@@ -1,0 +1,25 @@
+[Unit]
+Description=SimpleWebPlayer NAS video library
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=exec
+User=simplewebplayer
+Group=simplewebplayer
+Environment=PLAYER_DATA_DIR=/var/lib/simplewebplayer
+StateDirectory=simplewebplayer
+StateDirectoryMode=0700
+Environment=PLAYER_HOST=127.0.0.1 PLAYER_PORT=8080
+EnvironmentFile=-/etc/simplewebplayer/player.env
+ExecStart=/usr/local/bin/simplewebplayer serve --host ${PLAYER_HOST} --port ${PLAYER_PORT}
+Restart=on-failure
+RestartSec=3
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+
+[Install]
+WantedBy=multi-user.target

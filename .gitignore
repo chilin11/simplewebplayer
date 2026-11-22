@@ -1,0 +1,9 @@
+/.tools/
+/.venv/
+/.check-*/
+/data/
+/dist/
+*.db
+*.db-shm
+*.db-wal
+*.key

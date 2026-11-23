@@ -45,12 +45,20 @@ type discoveredDevice struct {
 	expires time.Time
 }
 
+// Serialize commands to one physical address, including across protocols and ports.
 type castReceiver struct {
 	iface int
-	addr  netip.AddrPort
+	addr  netip.Addr
 }
 
-func endpoint(d casting.Device) netip.AddrPort { return netip.AddrPortFrom(d.Addr, uint16(d.Port)) }
+type castEndpoint struct {
+	protocol string
+	address  netip.AddrPort
+}
+
+func endpoint(d casting.Device) castEndpoint {
+	return castEndpoint{d.Kind(), netip.AddrPortFrom(d.Addr, uint16(d.Port))}
+}
 
 type castTicket struct {
 	owner                  castOwner
@@ -62,7 +70,7 @@ type castTicket struct {
 }
 
 func (t castTicket) receiver() castReceiver {
-	return castReceiver{t.owner.network.index, endpoint(t.device)}
+	return castReceiver{t.owner.network.index, t.device.Addr}
 }
 
 func (t castTicket) mediaURL(l casting.LAN) string {
@@ -71,13 +79,13 @@ func (t castTicket) mediaURL(l casting.LAN) string {
 
 type castRegistry struct {
 	mu        sync.Mutex
-	choices   map[castOwner]map[netip.AddrPort]discoveredDevice
+	choices   map[castOwner]map[castEndpoint]discoveredDevice
 	operating map[castReceiver]bool // network call in flight; unaffected by logout or expiry
 	tickets   map[string]castTicket // media token; control IDs are independent
 }
 
 func newCastRegistry() castRegistry {
-	return castRegistry{choices: make(map[castOwner]map[netip.AddrPort]discoveredDevice), tickets: make(map[string]castTicket), operating: make(map[castReceiver]bool)}
+	return castRegistry{choices: make(map[castOwner]map[castEndpoint]discoveredDevice), tickets: make(map[string]castTicket), operating: make(map[castReceiver]bool)}
 }
 
 func castID() string {
@@ -127,7 +135,7 @@ func (s *castRegistry) remember(o castOwner, devices []casting.Device) ([]public
 		if owners >= castAccountLimit || len(s.choices) >= 128 {
 			return nil, castBusy()
 		}
-		choices = make(map[netip.AddrPort]discoveredDevice)
+		choices = make(map[castEndpoint]discoveredDevice)
 	}
 	n := len(choices)
 	for _, d := range devices {
@@ -145,7 +153,7 @@ func (s *castRegistry) remember(o castOwner, devices []casting.Device) ([]public
 			id = castID()
 		}
 		choices[key] = discoveredDevice{id, d, now.Add(castDeviceTTL)}
-		out = append(out, publicDevice{id, d.Name, d.Model})
+		out = append(out, publicDevice{ID: id, Name: d.Name, Model: d.Model, Protocol: key.protocol})
 	}
 	s.choices[o] = choices
 	return out, nil
@@ -203,10 +211,10 @@ func (s *castRegistry) finishLoad(t castTicket, loaded bool) {
 		delete(s.tickets, t.token)
 		return
 	}
-	// No overlapping transport operations on this receiver. Only an acknowledged
-	// LOAD displaces the old URL; an unsuccessful replacement keeps it playable.
+	// A successful LOAD replaces the URL on this transport endpoint only.
+	// Independent receiver apps at the same IP may still be streaming.
 	for k, old := range s.tickets {
-		if k != t.token && old.receiver() == t.receiver() {
+		if k != t.token && old.owner.network.index == t.owner.network.index && endpoint(old.device) == endpoint(t.device) {
 			delete(s.tickets, k)
 		}
 	}

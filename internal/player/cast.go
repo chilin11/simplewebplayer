@@ -5,7 +5,6 @@ import (
 	"errors"
 	"math"
 	"net/http"
-	"net/netip"
 	"path"
 	"strings"
 	"time"
@@ -15,9 +14,10 @@ import (
 )
 
 type publicDevice struct {
-	ID    string `json:"id"`
-	Name  string `json:"name"`
-	Model string `json:"model"`
+	ID       string `json:"id"`
+	Name     string `json:"name"`
+	Model    string `json:"model"`
+	Protocol string `json:"protocol"`
 }
 
 // Resolve the original session and its current permission in one DB snapshot.
@@ -53,13 +53,17 @@ func (c *call) castControl(tx *sql.Tx) error {
 				return &apiError{502, "cast_discovery_failed", "无法搜索电视，请检查局域网连接"}
 			}
 			choices := make([]casting.Device, 0, castVisibleLimit)
-			seen := make(map[netip.Addr]bool)
+			seen := make(map[castEndpoint]bool)
 			for _, d := range devices {
 				d.Addr = d.Addr.Unmap()
-				if !lan.Contains(d.Addr) || d.Port != casting.DevicePort || seen[d.Addr] {
+				if !d.AllowedOn(lan) {
 					continue
 				}
-				seen[d.Addr] = true
+				key := endpoint(d)
+				if seen[key] {
+					continue
+				}
+				seen[key] = true
 				if name, err := nameText(d.Name, 128); err == nil {
 					d.Name = name
 				} else {
@@ -71,7 +75,7 @@ func (c *call) castControl(tx *sql.Tx) error {
 					break
 				}
 			}
-			// Logout may have committed during mDNS. Do not repopulate a dead session.
+			// Logout may have committed during discovery. Do not repopulate a dead session.
 			return a.transaction(c.r.Context(), func(tx *sql.Tx) error {
 				u, err := sessionUser(tx, c.r)
 				if err != nil {
@@ -105,7 +109,7 @@ func (c *call) castControl(tx *sql.Tx) error {
 			err = a.opts.Cast.Stop(c.r.Context(), lan, t.device, t.mediaURL(lan))
 			a.casts.finishStop(t, err == nil)
 			if err != nil {
-				return &apiError{502, "cast_stop_failed", "已撤销取流授权，但未能确认电视已停止"}
+				return &apiError{502, "cast_stop_failed", "已撤销取流授权，但未能确认" + receiverLabel(t.device) + "已停止"}
 			}
 			c.status = http.StatusNoContent
 			return nil
@@ -153,13 +157,20 @@ func (c *call) castControl(tx *sql.Tx) error {
 			err = a.opts.Cast.Load(c.r.Context(), lan, t.device, m)
 			a.casts.finishLoad(t, err == nil)
 			if err != nil {
-				return &apiError{502, "cast_load_failed", "电视未能开始播放，请检查连接和视频格式"}
+				return &apiError{502, "cast_load_failed", receiverLabel(t.device) + "未能开始播放，请检查连接和视频格式"}
 			}
 			c.out = map[string]any{"cast": map[string]string{"id": t.controlID, "deviceId": id, "deviceName": t.device.Name}}
 			return nil
 		}
 	}
 	return nil
+}
+
+func receiverLabel(d casting.Device) string {
+	if d.Kind() == casting.ProtocolDLNA {
+		return "DLNA 电视"
+	}
+	return "Google Cast 电视"
 }
 
 func castCORS(h http.Header) {
@@ -233,6 +244,10 @@ func (c *call) castMedia() error {
 		return nil
 	case http.MethodGet, http.MethodHead:
 		sw := &streamWriter{ResponseWriter: w, castType: casting.ContentType(t.path)}
+		if t.device.Kind() == casting.ProtocolDLNA {
+			sw.dlna = true
+			sw.dlnaFeatures = r.Header.Get("GetContentFeatures.dlna.org") == "1"
+		}
 		err := a.opts.Media.Stream(sw, r, settings, base, t.path)
 		if sw.started {
 			return nil

@@ -16,8 +16,10 @@ for arch in amd64 arm64; do
         -ldflags="-s -w -X main.buildVersion=$version" \
         -o "$out/simplewebplayer-linux-$arch" .
 done
-sed "s/@RELEASE_TAG@/$version/g" install.sh > "$out/install.sh"
-chmod 0755 "$out/install.sh"
+for mode in install upgrade; do
+    sed -e "s/@RELEASE_TAG@/$version/g" -e "s/@RELEASE_MODE@/$mode/g" install.sh > "$out/$mode.sh"
+    chmod 0755 "$out/$mode.sh"
+done
 cp deploy/simplewebplayer.service "$out/simplewebplayer.service"
 # Include dependency notices when redistributing the statically linked binaries.
 cp third_party/go-smb2/LICENSE "$out/go-smb2-LICENSE.txt"
@@ -39,7 +41,7 @@ cp third_party/go-smb2/LICENSE "$out/go-smb2-LICENSE.txt"
 ) > "$out/THIRD_PARTY_NOTICES.txt"
 (
     cd "$out"
-    sha256sum install.sh simplewebplayer.service go-smb2-LICENSE.txt THIRD_PARTY_NOTICES.txt \
+    sha256sum install.sh upgrade.sh simplewebplayer.service go-smb2-LICENSE.txt THIRD_PARTY_NOTICES.txt \
         simplewebplayer-linux-amd64 simplewebplayer-linux-arm64 > SHA256SUMS
 )
 printf 'Release assets: %s\n' "$out"

@@ -11,7 +11,11 @@ import (
 	"strings"
 )
 
-const DevicePort = 8009
+const (
+	DevicePort     = 8009
+	ProtocolGoogle = "google_cast"
+	ProtocolDLNA   = "dlna"
+)
 
 type LAN struct {
 	Interface net.Interface
@@ -98,10 +102,35 @@ func (l LAN) HTTPAddress() string {
 }
 
 type Device struct {
-	Name  string
-	Model string
-	Addr  netip.Addr
-	Port  int
+	Name     string
+	Model    string
+	Addr     netip.Addr
+	Port     int
+	Protocol string
+}
+
+// Kind normalizes legacy Google Cast devices that originally had no protocol field.
+func (d Device) Kind() string {
+	if d.Protocol == "" {
+		return ProtocolGoogle
+	}
+	return d.Protocol
+}
+
+// AllowedOn is the application-side boundary; transports must additionally
+// verify discovery provenance and never dial a browser-supplied address.
+func (d Device) AllowedOn(l LAN) bool {
+	if !l.Contains(d.Addr) {
+		return false
+	}
+	switch d.Kind() {
+	case ProtocolGoogle:
+		return d.Port == DevicePort
+	case ProtocolDLNA:
+		return d.Port > 0 && d.Port <= 65535
+	default:
+		return false
+	}
 }
 
 type Media struct {

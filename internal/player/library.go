@@ -33,9 +33,11 @@ func queryPath(raw string) (string, error) {
 // Even if an adapter fails after sending media, never append JSON to the byte stream.
 type streamWriter struct {
 	http.ResponseWriter
-	started    bool
-	attachment string
-	castType   string
+	started      bool
+	attachment   string
+	castType     string
+	dlna         bool
+	dlnaFeatures bool
 }
 
 func (w *streamWriter) Unwrap() http.ResponseWriter { return w.ResponseWriter }
@@ -48,6 +50,13 @@ func (w *streamWriter) start(status int) {
 	if !w.started && w.castType != "" && (status == http.StatusOK || status == http.StatusPartialContent) {
 		w.Header().Set("Content-Type", w.castType)
 		castCORS(w.Header())
+		if w.dlna {
+			w.Header().Set("transferMode.dlna.org", "Streaming")
+			if w.dlnaFeatures {
+				// Byte seek only; original file, no inferred codec profile.
+				w.Header().Set("contentFeatures.dlna.org", "DLNA.ORG_OP=01;DLNA.ORG_CI=0")
+			}
+		}
 	}
 	w.started = true
 }

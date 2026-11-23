@@ -18,9 +18,9 @@ import (
 
 	"golang.org/x/term"
 
-	"simplewebplayer/internal/castnet"
 	"simplewebplayer/internal/nas"
 	"simplewebplayer/internal/player"
+	"simplewebplayer/internal/tvnet"
 )
 
 //go:embed web
@@ -160,7 +160,7 @@ func run(args []string) error {
 	}
 	opts := player.Options{Media: nas.New(), SecureCookies: os.Getenv("PLAYER_SECURE_COOKIES") == "1"}
 	if args[0] == "serve" && os.Getenv("PLAYER_DISABLE_CAST") != "1" {
-		opts.Cast = castnet.New()
+		opts.Cast = tvnet.New()
 	}
 	app, err := player.Open(dataDir, opts)
 	if err != nil {

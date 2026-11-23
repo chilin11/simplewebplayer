@@ -507,10 +507,20 @@
     }
   }
 
-  // ---------- 投屏到电视（Google Cast） ----------
+  // ---------- 投屏到电视（Google Cast / DLNA） ----------
   // 由 Linux 服务端在同一 IPv4 子网内发现电视并下发播放；浏览器只调用同源 JSON 接口，
   // 不直接联系电视、也拿不到媒体临时地址。本地播放器只在投屏成功且仍是同一来源时暂停。
   const CAST_FRIENDLY_EXTS = { MP4: true, M4V: true, WEBM: true };
+
+  // 旧后端不返回 protocol 字段时按 Google Cast 处理
+  function normalizeCastProtocol(protocol) {
+    const p = protocol === undefined || protocol === null ? '' : String(protocol).trim().toLowerCase();
+    return p === 'dlna' ? 'dlna' : 'google_cast';
+  }
+
+  function castProtocolLabel(protocol) {
+    return protocol === 'dlna' ? 'DLNA' : 'Google Cast';
+  }
 
   function sameSource(a, b) {
     return Boolean(a && b && String(a.rootId) === String(b.rootId) && a.path === b.path);
@@ -536,11 +546,11 @@
 
   function castHelpDetails(open) {
     const tips = [
-      '手机 / 电脑需通过家里的局域网地址直接打开播放器；经 Internet / Cloudflare 等外网地址访问时无法投屏。',
-      '播放器服务器与电视须在同一网段（同一路由器 / 同一 Wi-Fi），不要连接访客 Wi-Fi，并在路由器中关闭“AP 隔离 / 客户端隔离”。',
-      'Google TV / Android TV 请确认已开启内置 Chromecast（Google Cast），电视需开机或处于可唤醒状态。',
-      '电视端优先支持 MP4（H.264 视频 + AAC 音频）；MKV、AVI 等格式会被服务端拒绝，HEVC / AC3 等编码也可能无法播放。',
-      '仅支持 Google Cast 设备；不支持 AirPlay、Miracast、DLNA 或屏幕镜像。',
+      '支持 Google Cast 与 DLNA 电视；不支持 AirPlay、Miracast 或整屏镜像。',
+      '电视需保持开机（待机可能不广播）；部分 DLNA 电视不支持续播，会从头开始播放。',
+      'MP4（H.264 + AAC）最兼容；MKV、AVI 等格式会被拒绝，HEVC / AC3 等编码也可能无法播放。',
+      '手机 / 电脑需经家庭局域网直连播放器（不能经外网 / 代理访问），且电视与服务器须在同一网段，不要连访客 Wi-Fi 或开启“AP 隔离”。',
+      'Google TV / Android TV 请确认开启内置 Chromecast（Google Cast）；其他电视请开启 DLNA / 投屏接收功能。',
     ];
     const list = U.el('ul', { className: 'cast-help-list' });
     for (let i = 0; i < tips.length; i += 1) {
@@ -723,9 +733,16 @@
     }
 
     function render() {
+      const resumeSeconds = sameSource(source, state.activeVideo) ? currentStartSeconds() : 0;
+      const hasDlna = devices.some(function (d) {
+        return d.protocol === 'dlna';
+      });
       startPreview.textContent =
-        sameSource(source, state.activeVideo) && currentStartSeconds() > 0
-          ? '将从 ' + formatClock(currentStartSeconds()) + ' 处续播'
+        resumeSeconds > 0
+          ? '将从 ' +
+            formatClock(resumeSeconds) +
+            ' 处续播' +
+            (hasDlna ? '（部分 DLNA 电视会从头播放）' : '')
           : '将从头开始播放';
 
       const busySearch = phase === 'searching';
@@ -746,7 +763,7 @@
         nodes.push(
           U.el('div', { className: 'cast-searching' }, [
             U.el('span', { className: 'spinner spinner-sm', attrs: { 'aria-hidden': 'true' } }),
-            U.el('span', { text: '正在搜索同一网络中的 Google Cast 电视…' }),
+            U.el('span', { text: '正在搜索同一网络中的 Google Cast / DLNA 电视…' }),
           ])
         );
       } else if (phase === 'error') {
@@ -764,13 +781,13 @@
             U.el('p', { className: 'cast-empty-title', text: '没有找到可投屏的电视' }),
             U.el('p', {
               className: 'cast-empty-sub',
-              text: '请确认电视已开机、与播放器服务器在同一网段，然后点“重新搜索”。',
+              text: '请确认电视已开机（待机可能不广播）、与播放器服务器在同一网段，然后点“重新搜索”。',
             }),
           ])
         );
       } else {
         statusLine.textContent =
-          castingDeviceId !== null ? '正在连接电视…' : '找到 ' + devices.length + ' 台电视，请选择要投放的设备';
+          castingDeviceId !== null ? '正在连接电视…' : '找到 ' + devices.length + ' 个投屏选项，请选择要投放的设备';
         const list = U.el('ul', { className: 'cast-device-list', attrs: { 'aria-label': '可用电视' } });
         for (let i = 0; i < devices.length; i += 1) {
           list.appendChild(U.el('li', null, renderDeviceButton(devices[i])));
@@ -796,6 +813,7 @@
     function renderDeviceButton(device) {
       const busy = castingDeviceId === device.id;
       const locked = castingDeviceId !== null;
+      const isDlna = device.protocol === 'dlna';
       const btn = U.el(
         'button',
         {
@@ -803,6 +821,7 @@
           props: { type: 'button' },
           attrs: {
             'data-device-id': device.id,
+            'data-protocol': device.protocol,
             'aria-busy': busy ? 'true' : 'false',
             'aria-disabled': locked ? 'true' : 'false',
           },
@@ -815,8 +834,20 @@
         [
           U.el('span', { className: 'cast-device-icon', attrs: { 'aria-hidden': 'true' } }, U.createIcon('tv', 20)),
           U.el('span', { className: 'cast-device-text' }, [
-            U.el('span', { className: 'cast-device-name', text: device.name }),
+            U.el('span', { className: 'cast-device-head' }, [
+              U.el('span', { className: 'cast-device-name', text: device.name }),
+              U.el('span', {
+                className: 'cast-protocol-tag ' + (isDlna ? 'is-dlna' : 'is-google-cast'),
+                text: castProtocolLabel(device.protocol),
+              }),
+            ]),
             device.model ? U.el('span', { className: 'cast-device-model', text: device.model }) : null,
+            isDlna
+              ? U.el('span', {
+                  className: 'cast-device-hint',
+                  text: '部分电视不支持续播，会从头播放',
+                })
+              : null,
           ]),
           U.el('span', { className: 'cast-device-action', text: busy ? '连接中…' : '投放' }),
         ]
@@ -846,6 +877,7 @@
             id: String(d.id),
             name: d.name ? String(d.name) : '未命名电视',
             model: d.model ? String(d.model) : '',
+            protocol: normalizeCastProtocol(d.protocol),
           });
         }
         phase = 'ready';
@@ -908,7 +940,13 @@
           return;
         }
         // 失败不触碰本地播放器
-        castErrorText = '投屏到「' + device.name + '」失败：' + describeCastError(err, 'start');
+        castErrorText =
+          '投屏到「' +
+          device.name +
+          '（' +
+          castProtocolLabel(device.protocol) +
+          '）」失败：' +
+          describeCastError(err, 'start');
         if (!stillOpen()) {
           U.showToast(castErrorText, 'error');
         }

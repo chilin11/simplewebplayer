@@ -12,7 +12,17 @@
 
 安装脚本会下载并校验 [GitHub Release](https://github.com/chilin11/simplewebplayer/releases/latest) 的 Go 二进制，创建低权限服务账号，启动服务并设置开机运行。首次安装时设置 `admin` 的密码（不会回显，没有默认密码）；安装结束会打印访问地址。默认选择检测到的局域网地址，检测不到则只监听 `127.0.0.1`，端口为 `8080`。
 
-**升级**：先用 `/usr/local/bin/simplewebplayer --version` 记下当前版本。需要可回退时，先停服，以私有权限备份整个 `/var/lib/simplewebplayer/` 和 `/etc/simplewebplayer/player.env`，再重跑安装命令。安装器保留原账号、NAS 配置、目录授权和监听配置，但不会在启动检查失败时自动回退。失败时先看 `sudo journalctl -u simplewebplayer -n 50`。若需恢复，停服并保留当前数据副本，从备份成套恢复旧数据、密钥及配置（保持所有者和权限），把上面下载地址中的 `releases/latest/download` 换成 `releases/download/旧版本标签`，安装已知可用的版本。不要删除密钥或重新初始化管理员。如果需要调整监听地址或端口，修改这个配置文件的 `PLAYER_HOST` / `PLAYER_PORT`，然后执行 `sudo systemctl restart simplewebplayer`。局域网 HTTP 没有传输加密，只在可信网络使用。
+## 一条命令升级
+
+已经用一键脚本安装过的 systemd Linux（包括 v1.0.0 / v1.1.0），用独立的 `upgrade.sh`：
+
+```sh
+(upgrade=$(mktemp) && trap 'rm -f -- "$upgrade"' EXIT && wget -qO "$upgrade" https://github.com/chilin11/simplewebplayer/releases/latest/download/upgrade.sh && sudo bash "$upgrade")
+```
+
+升级不会重设管理员密码，也不会修改原有账号、NAS、目录授权和监听配置。已是最新版本会直接退出；有新版本时会短暂重启服务。不自动降级，不在启动失败时自动回退。失败时先看 `sudo journalctl -u simplewebplayer -n 50`。需要回退时，应预先停服备份 `/var/lib/simplewebplayer/` 和 `/etc/simplewebplayer/player.env`；从备份成套恢复后，用指定旧标签的 `install.sh` 手动回退。不要删除密钥或重新初始化管理员。
+
+调整监听地址或端口可修改 `/etc/simplewebplayer/player.env` 的 `PLAYER_HOST` / `PLAYER_PORT`，再执行 `sudo systemctl restart simplewebplayer`。局域网 HTTP 只在可信网络使用。
 
 <details>
 <summary>手动运行 / 从源码构建</summary>
@@ -45,12 +55,12 @@ export PLAYER_DATA_DIR="$PWD/data"
 
 浏览器直接播放，支持 HTTP Range 拖动进度，不转码。片库和播放页可下载授权范围内的原视频。优先使用 **MP4（H.264 + AAC）**，或浏览器支持的 WebM。列表也识别 M4V、OGV、MOV、MKV，但容器或编码不兼容时无法播放；尤其 MKV/部分 HEVC 不通用。只读访问，不提供上传、转码、刮削、字幕管理或公网分享链接。
 
-## 投屏到 TCL Google TV / Chromecast
+## 投屏到电视：Google Cast 与 DLNA
 
-从 **v1.1.0** 起支持投屏。在 **同一局域网** 用 `http://服务器局域网IP:8080` 打开片库，选中视频 → **投屏到电视** → 选择电视。电视会直接请求获授权的视频，不需要在电视上登录。网页可停止投屏，局域网里的浏览器和 Linux 服务不需要安装 Cast 插件。
+在 **同一局域网** 用 `http://服务器局域网IP:8080` 打开片库，选视频 → **投屏到电视**。列表同时搜索 **Google Cast**（例如内置 Chromecast 的 TCL Google TV）与 **DLNA/UPnP MediaRenderer**（取决于机型和设置，例如部分 LG webOS）。同一台电视可能列出两个带不同协议标签的选项。电视会直接请求有权限的视频，不用在电视登录，也不用安装浏览器插件。
 
-- **找不到电视：** 先唤醒 TCL，确认电视与 Linux 同一 IPv4 网段（有线或同一路由器的 Wi‑Fi 均可），不在访客 Wi‑Fi，路由器未启用无线设备隔离。在电视的系统应用中确认 **Google Cast / Chromecast built-in** 已启用，并核对电视的 Cast 名称与型号后重新搜索。如果没有收到友好名，列表可能只显示设备主机名。不要仅凭相似名字投屏；同网手机可作为对照，但 YouTube 可见本身不证明服务端收到了这台电视的 Cast 广告。Linux 防火墙如有限制，只在可信局域网允许 mDNS UDP 5353、Linux 至电视 TCP 8009、电视至应用 HTTP 端口。不必对公网开放任何投屏端口。
-- **找得到但播不了：** 首次请试 **MP4（H.264 视频 + AAC 音频）**。也会尝试 M4V、WebM，但实际编解码支持由电视决定；不转码，不支持投屏 MKV。仅支持 Google Cast，不是屏幕镜像、AirPlay、Miracast 或 DLNA。
+- **找不到电视：** 先唤醒电视，确认与 Linux 在同一 IPv4 网段、不在访客 Wi‑Fi、无线设备隔离已关闭。在电视设置中核对接收器名称，按机型开启 Google Cast、DLNA 或媒体接收后重新搜索。电视待机可能不广播；手机视频 App 可投也不一定使用同一种协议。防火墙如有限制，只在可信局域网允许 mDNS UDP 5353、SSDP UDP 1900、Linux 至电视的控制连接（Google Cast TCP 8009；DLNA 端口由电视宣告），以及电视至应用的 HTTP 端口。不要对公网开放这些端口。
+- **找得到但播不了：** 首次请试 **MP4（H.264 + AAC）**。其他格式和续播取决于电视；部分 DLNA 设备会从头播。不转码，不支持投屏 MKV、AirPlay、Miracast 或整屏镜像。
 - **只用于家中可信网络：** 服务仅从同网段直连 HTTP 控制投屏，反代/Cloudflare 地址不提供投屏。电视获得绑定到设备 IP、登录会话和文件的临时取流权限，撤销授权、退出或停播后新请求会失败；局域网发现不验证电视的硬件身份。需要禁用功能时在 `/etc/simplewebplayer/player.env` 加 `PLAYER_DISABLE_CAST=1` 并重启。
 
 ## 以后接 cloudflared

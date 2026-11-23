@@ -153,7 +153,7 @@
       });
     },
 
-    // 投屏（Google Cast）：由服务端在同一 IPv4 局域网内发现并控制电视，浏览器不直接联系电视
+    // 投屏（Google Cast / DLNA）：由服务端在同一 IPv4 局域网内发现并控制电视，浏览器不直接联系电视
     discoverCastDevices: function (signal) {
       return request('/api/cast/discover', {
         method: 'POST',

@@ -99,6 +99,56 @@ func TestCastRegistryDeadlines(t *testing.T) {
 	}
 }
 
+func TestCastRegistryDualProtocol(t *testing.T) {
+	s := newCastRegistry()
+	o := castOwner{account: 1, session: "same browser"}
+	google := casting.Device{Addr: netip.MustParseAddr("192.168.1.10"), Port: 8009}
+	dlna := google
+	dlna.Protocol = casting.ProtocolDLNA
+	otherPort := dlna
+	otherPort.Port = 80
+	devices, err := s.remember(o, []casting.Device{google, dlna, otherPort})
+	if err != nil {
+		t.Fatal(err)
+	}
+	again, err := s.remember(o, []casting.Device{dlna, google})
+	if err != nil || again[0].ID != devices[1].ID || again[1].ID != devices[0].ID {
+		t.Fatal("IDs were not stable across scan order")
+	}
+	issue := func(i int) (castTicket, error) {
+		return s.issue(o, devices[i].ID, 1, "a.mp4", time.Now().Add(time.Hour).Unix())
+	}
+	g, err := issue(0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, i := range []int{1, 2} {
+		if _, err := issue(i); err == nil {
+			t.Fatal("overlapping LOAD on same TV")
+		}
+	}
+	s.finishLoad(g, true)
+	d, err := issue(1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.finishLoad(d, true)
+	if _, ok := s.lookup(g.token); !ok {
+		t.Fatal("DLNA displaced independent Google receiver")
+	}
+	stop, err := s.beginStop(o, g.controlID)
+	if err != nil || stop.token != g.token || stop.device.Kind() != casting.ProtocolGoogle {
+		t.Fatal("stop targeted the wrong protocol or media")
+	}
+	if _, err := issue(2); err == nil {
+		t.Fatal("DLNA LOAD overlapped Google STOP")
+	}
+	s.finishStop(stop, true)
+	if _, ok := s.lookup(d.token); !ok {
+		t.Fatal("stopping Google receiver revoked DLNA media")
+	}
+}
+
 func TestCastAccountQuota(t *testing.T) {
 	s := newCastRegistry()
 	expiry := time.Now().Add(time.Hour).Unix()
@@ -148,6 +198,12 @@ func TestCastAccountQuota(t *testing.T) {
 }
 
 func TestCastAuthorization(t *testing.T) {
+	for i, protocol := range []string{casting.ProtocolGoogle, casting.ProtocolDLNA} {
+		t.Run(protocol, func(t *testing.T) { testCastAuthorization(t, i, protocol) })
+	}
+}
+
+func testCastAuthorization(t *testing.T, deviceIndex int, protocol string) {
 	const start, discover, stop = "/api/library/1/cast", "/api/cast/discover", "/api/cast/stop"
 	const tv = "192.168.20.42"
 	const file = "我的电影/a.M4V"
@@ -163,6 +219,13 @@ func TestCastAuthorization(t *testing.T) {
 		{Name: "remote", Addr: netip.MustParseAddr("192.168.19.2"), Port: 8009},
 		{Name: "wrong port", Addr: netip.MustParseAddr(tv), Port: 8008},
 		{Name: "TV", Model: "Receiver", Addr: netip.MustParseAddr(tv), Port: 8009},
+		{Name: "duplicate", Protocol: casting.ProtocolGoogle, Addr: netip.MustParseAddr(tv), Port: 8009},
+		{Name: "TV", Protocol: casting.ProtocolDLNA, Addr: netip.MustParseAddr(tv), Port: 8009},
+		{Name: "duplicate", Protocol: casting.ProtocolDLNA, Addr: netip.MustParseAddr(tv), Port: 8009},
+		{Name: "other endpoint", Protocol: casting.ProtocolDLNA, Addr: netip.MustParseAddr(tv), Port: 49152},
+		{Name: "unknown", Protocol: "unknown", Addr: netip.MustParseAddr(tv), Port: 8009},
+		{Name: "invalid", Protocol: casting.ProtocolDLNA, Addr: netip.MustParseAddr(tv), Port: 65536},
+		{Name: "off LAN", Protocol: casting.ProtocolDLNA, Addr: netip.MustParseAddr("192.168.19.2"), Port: 80},
 	}}
 	want(t, req(a, admin, "POST", discover, "{}"), 503)
 	a.opts.Cast = transport
@@ -188,10 +251,13 @@ func TestCastAuthorization(t *testing.T) {
 	w = req(a, viewer, "POST", discover, "{}")
 	want(t, w, 200)
 	var found struct{ Devices []publicDevice }
-	if err := json.Unmarshal(w.Body.Bytes(), &found); err != nil || len(found.Devices) != 1 || found.Devices[0].Name != "TV" || strings.Contains(w.Body.String(), tv) || w.Header().Get("Access-Control-Allow-Origin") != "" {
+	if err := json.Unmarshal(w.Body.Bytes(), &found); err != nil || len(found.Devices) != 3 || found.Devices[deviceIndex].Name != "TV" || found.Devices[deviceIndex].Protocol != protocol || found.Devices[2].Name != "other endpoint" || strings.Contains(w.Body.String(), tv) || w.Header().Get("Access-Control-Allow-Origin") != "" {
 		t.Fatal("discovery data or CORS boundary")
 	}
-	id := found.Devices[0].ID
+	id := found.Devices[deviceIndex].ID
+	if found.Devices[0].ID == found.Devices[1].ID || found.Devices[1].ID == found.Devices[2].ID {
+		t.Fatal("different endpoints shared an ID")
+	}
 	payload := `{"deviceId":"` + id + `","path":"` + file + `","startSeconds":1.25}`
 	want(t, req(a, viewer, "POST", start, payload), 404)
 	grant := func(value string) {
@@ -201,6 +267,7 @@ func TestCastAuthorization(t *testing.T) {
 	grant("[1]")
 	want(t, req(a, second, "POST", start, payload), 404)
 	want(t, req(a, viewer, "POST", start, strings.Replace(payload, id, tv, 1)), 404)
+	want(t, req(a, viewer, "POST", start, strings.Replace(payload, "1.25", `1.25,"protocol":"dlna"`, 1)), 400)
 	want(t, req(a, viewer, "POST", start, strings.Replace(payload, file, "a.mkv", 1)), 415)
 	want(t, req(a, viewer, "POST", start, strings.Replace(payload, "1.25", "-1", 1)), 400)
 	want(t, req(a, viewer, "POST", start, strings.Replace(payload, "1.25", "0,\"url\":\"http://example.com\"", 1)), 400)
@@ -223,17 +290,27 @@ func TestCastAuthorization(t *testing.T) {
 		if w.Header().Get("Access-Control-Allow-Origin") != "" || w.Header().Get("Cross-Origin-Resource-Policy") != "same-origin" {
 			t.Fatal("CORS on denial")
 		}
+		if w.Header().Get("transferMode.dlna.org") != "" || w.Header().Get("contentFeatures.dlna.org") != "" {
+			t.Fatal("DLNA headers on denial")
+		}
 	}
 	transport.load = func(d casting.Device, m casting.Media) error {
 		prefix := "http://192.168.20.10:8080"
-		if d.Addr.String() != tv || m.Title != "a.M4V" || m.ContentType != "video/mp4" || m.StartSeconds != 1.25 || !strings.HasPrefix(m.URL, prefix+castMediaPath) {
+		if d.Kind() != protocol || d.Addr.String() != tv || m.Title != "a.M4V" || m.ContentType != "video/mp4" || m.StartSeconds != 1.25 || !strings.HasPrefix(m.URL, prefix+castMediaPath) {
 			t.Fatal("unexpected media load")
 		}
 		loadedURL = m.URL
 		mediaPath = strings.TrimPrefix(m.URL, prefix)
 		// A synchronous receiver request would time out if LOAD held SQLite's connection.
-		w := fetch("GET", tv, mediaPath, map[string]string{"Range": "bytes=2-3"})
+		w := fetch("GET", tv, mediaPath, map[string]string{"Range": "bytes=2-3", "GetContentFeatures.dlna.org": "1"})
 		want(t, w, 206)
+		mode, features := "", ""
+		if protocol == casting.ProtocolDLNA {
+			mode, features = "Streaming", "DLNA.ORG_OP=01;DLNA.ORG_CI=0"
+		}
+		if w.Header().Get("transferMode.dlna.org") != mode || w.Header().Get("contentFeatures.dlna.org") != features || w.Header().Get("Content-Type") != "video/mp4" {
+			t.Fatal("wrong range response metadata for protocol")
+		}
 		if w.Body.String() != "cd" || w.Header().Get("Access-Control-Allow-Origin") != "*" || w.Header().Get("Content-Range") != "bytes 2-3/8" || w.Header().Get("Cross-Origin-Resource-Policy") != "cross-origin" {
 			t.Fatal("unexpected range response")
 		}
@@ -252,8 +329,12 @@ func TestCastAuthorization(t *testing.T) {
 		return result.Cast.ID
 	}
 	controlID := load()
-	want(t, fetch("HEAD", tv, mediaPath, nil), 200)
-	deny(fetch("GET", "192.168.20.43", mediaPath, nil))
+	w = fetch("HEAD", tv, mediaPath, nil)
+	want(t, w, 200)
+	if w.Header().Get("contentFeatures.dlna.org") != "" || (w.Header().Get("transferMode.dlna.org") == "Streaming") != (protocol == casting.ProtocolDLNA) {
+		t.Fatal("unexpected HEAD metadata")
+	}
+	deny(fetch("GET", "192.168.20.43", mediaPath, map[string]string{"GetContentFeatures.dlna.org": "1"}))
 	deny(fetch("GET", tv, mediaPath+"?path=another.mp4", nil))
 	deny(fetch("GET", tv, castMediaPath+controlID, nil))
 	lan.Port++
@@ -283,7 +364,7 @@ func TestCastAuthorization(t *testing.T) {
 	deny(fetch("GET", tv, priorPath, nil))
 	stopCalls := 0
 	transport.stop = func(d casting.Device, url string) error {
-		if d.Addr.String() != tv || url != loadedURL {
+		if d.Kind() != protocol || d.Addr.String() != tv || url != loadedURL {
 			t.Fatal("stop not scoped to current media")
 		}
 		deny(fetch("GET", tv, mediaPath, nil))
@@ -316,8 +397,8 @@ func TestCastAuthorization(t *testing.T) {
 	if err := json.Unmarshal(w.Body.Bytes(), &found); err != nil {
 		t.Fatal(err)
 	}
-	payload = strings.Replace(payload, id, found.Devices[0].ID, 1)
-	id = found.Devices[0].ID
+	payload = strings.Replace(payload, id, found.Devices[deviceIndex].ID, 1)
+	id = found.Devices[deviceIndex].ID
 	workingLoad := transport.load
 	transport.load = func(_ casting.Device, m casting.Media) error {
 		mediaPath = strings.TrimPrefix(m.URL, "http://"+lan.HTTPAddress())
@@ -325,7 +406,11 @@ func TestCastAuthorization(t *testing.T) {
 	}
 	w = req(a, viewer, "POST", start, payload)
 	want(t, w, 502)
-	if strings.Contains(w.Body.String(), "/api/cast/media/") {
+	label := "Google Cast"
+	if protocol == casting.ProtocolDLNA {
+		label = "DLNA"
+	}
+	if strings.Contains(w.Body.String(), "/api/cast/media/") || strings.Contains(w.Body.String(), lan.HTTPAddress()) || !strings.Contains(w.Body.String(), label) {
 		t.Fatal("transport error leaked ticket")
 	}
 	deny(fetch("HEAD", tv, mediaPath, nil))

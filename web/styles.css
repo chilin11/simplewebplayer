@@ -1501,6 +1501,15 @@ select.input {
   display: flex;
   flex: 1 1 auto;
   flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.cast-device-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--s1) var(--s2);
   min-width: 0;
 }
 
@@ -1512,10 +1521,46 @@ select.input {
   white-space: pre-wrap;
 }
 
+.cast-protocol-tag {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  min-height: 20px;
+  padding: 0 7px;
+  border: 1px solid var(--line-strong);
+  border-radius: 999px;
+  background: var(--surface-3);
+  color: var(--text-2);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  line-height: 1.2;
+  white-space: nowrap;
+}
+
+.cast-protocol-tag.is-google-cast {
+  border-color: var(--accent-line);
+  background: var(--accent-soft);
+  color: var(--accent-strong);
+}
+
+.cast-protocol-tag.is-dlna {
+  border-color: rgba(147, 184, 216, 0.42);
+  background: var(--info-soft);
+  color: var(--info);
+}
+
 .cast-device-model {
   color: var(--text-3);
   font-size: 12.5px;
   line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+
+.cast-device-hint {
+  color: var(--text-3);
+  font-size: 12px;
+  line-height: 1.45;
   overflow-wrap: anywhere;
 }
 
@@ -2800,6 +2845,16 @@ select.input {
     width: 44px;
     height: 44px;
   }
+
+  .cast-device {
+    gap: var(--s2);
+    padding: var(--s2);
+  }
+
+  .cast-device-icon {
+    width: 34px;
+    height: 34px;
+  }
 }
 
 /* 触屏：保证可点区域 */
@@ -2854,7 +2909,9 @@ select.input {
   .entry-btn,
   .entry-dl,
   .tab-btn,
-  .record-card {
+  .record-card,
+  .cast-device,
+  .cast-protocol-tag {
     border: 1px solid CanvasText;
   }
 

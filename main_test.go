@@ -15,9 +15,9 @@ import (
 	"strings"
 	"testing"
 
-	"simplewebplayer/internal/castnet"
 	"simplewebplayer/internal/nas"
 	"simplewebplayer/internal/player"
+	"simplewebplayer/internal/tvnet"
 )
 
 // TestLinuxPlaybackFlow exercises the shipped router and an isolated, signed
@@ -155,7 +155,7 @@ func TestLinuxPlaybackFlow(t *testing.T) {
 // Exercise the actual application router with the production Cast transport;
 // a loopback connection must never start discovery, even with a valid login.
 func TestCastRouterRejectsLoopback(t *testing.T) {
-	app, err := player.Open(t.TempDir(), player.Options{Media: nas.New(), Cast: castnet.New()})
+	app, err := player.Open(t.TempDir(), player.Options{Media: nas.New(), Cast: tvnet.New()})
 	if err != nil {
 		t.Fatal(err)
 	}

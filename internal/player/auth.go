@@ -38,9 +38,11 @@ func userByID(tx *sql.Tx, id int64) (*User, error) {
 	return readUser(tx.QueryRow("SELECT id,username,role,enabled FROM users WHERE id=?", id))
 }
 func passwordHash(password string) ([]byte, error) {
-	n := utf8.RuneCountInString(password)
-	if !utf8.ValidString(password) || n < 10 || n > 256 || strings.TrimSpace(password) == "" {
-		return nil, invalid("密码长度须为 10–256 个字符")
+	if strings.TrimSpace(password) == "" {
+		return nil, invalid("密码不能为空或全是空白字符")
+	}
+	if !utf8.ValidString(password) || utf8.RuneCountInString(password) > 256 {
+		return nil, invalid("请使用不超过 256 个字符的有效密码")
 	}
 	salt := make([]byte, 16)
 	rand.Read(salt)

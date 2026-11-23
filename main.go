@@ -72,7 +72,7 @@ func initAdmin(app *player.App, username string) error {
 		defer clear(pw)
 		return string(pw), err
 	}
-	password, err := prompt("管理员密码（至少 10 字符）: ")
+	password, err := prompt("管理员密码: ")
 	if err != nil {
 		return err
 	}

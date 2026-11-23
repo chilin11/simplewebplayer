@@ -101,6 +101,37 @@ func setup(t *testing.T, dir string, m media.Backend) (*App, *http.Cookie) {
 	}
 	return a, signIn(t, a, "first")
 }
+func TestShortPlayerPasswords(t *testing.T) {
+	a, err := Open(t.TempDir(), Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer a.Close()
+	if err := a.InitAdmin("first", " "); err == nil {
+		t.Fatal("blank initial password was accepted")
+	}
+	if err := a.InitAdmin("first", "测"); err != nil {
+		t.Fatalf("short initial password: %v", err)
+	}
+	login := func(name, password string) *httptest.ResponseRecorder {
+		body, err := json.Marshal(map[string]string{"username": name, "password": password})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return req(a, nil, "POST", "/api/login", string(body))
+	}
+	first := login("first", "测")
+	want(t, first, 200)
+	admin := first.Result().Cookies()[0]
+	users := "/api/admin/users"
+	want(t, req(a, admin, "POST", users, `{"username":"viewer","role":"viewer","password":"ab"}`), 201)
+	want(t, login("viewer", "ab"), 200)
+	want(t, req(a, admin, "PATCH", users+"/2", `{"password":" "}`), 400)
+	want(t, req(a, admin, "PATCH", users+"/2", `{"password":"x"}`), 200)
+	want(t, login("viewer", "ab"), 401)
+	want(t, login("viewer", "x"), 200)
+}
+
 func TestConcurrentLastAdmin(t *testing.T) {
 	dir := t.TempDir()
 	a, first := setup(t, dir, nil)

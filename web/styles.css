@@ -2622,6 +2622,103 @@ select.input {
   }
 }
 
+/* ---------- 目录分页 ---------- */
+.pager {
+  display: grid;
+  flex: none;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--s2);
+  margin-top: var(--s3);
+  padding-top: var(--s3);
+  border-top: 1px solid var(--line);
+}
+
+.pager-status {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  min-width: 0;
+  color: var(--text-3);
+  font-size: 12.5px;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.4;
+  text-align: center;
+}
+
+.pager-page {
+  color: var(--text-2);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.btn.pager-btn {
+  gap: 4px;
+  min-height: 40px;
+}
+
+.btn.pager-btn[aria-disabled="true"] {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+/* ---------- 窄屏：目录 / 播放切换（宽屏双栏时不显示） ---------- */
+.pane-nav {
+  display: none;
+}
+
+.pane-tab {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--s2);
+  min-width: 0;
+  min-height: 44px;
+  padding: 0 var(--s3);
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--text-2);
+  font-size: 15px;
+  font-weight: 600;
+  white-space: nowrap;
+  transition: background-color 0.15s ease, color 0.15s ease;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.pane-tab:hover:not([aria-pressed="true"]) {
+  background: var(--surface-3);
+  color: var(--text);
+}
+
+.pane-tab[aria-pressed="true"] {
+  background: var(--accent);
+  color: var(--accent-ink);
+}
+
+.pane-eq {
+  color: var(--accent-strong);
+}
+
+.pane-tab[aria-pressed="true"] .pane-eq {
+  color: currentColor;
+}
+
+.pane-cast-tag {
+  padding: 0 6px;
+  border-radius: 999px;
+  background: var(--info-soft);
+  color: var(--info);
+  font-size: 11.5px;
+  font-weight: 600;
+  line-height: 18px;
+}
+
+.pane-tab[aria-pressed="true"] .pane-cast-tag {
+  background: rgba(30, 20, 7, 0.16);
+  color: var(--accent-ink);
+}
+
 /* ---------- 响应式 ---------- */
 /* 宽屏吸顶与固定视口目录栏：画面、控制栏与目录浏览在一屏内协调共处 */
 @media (min-width: 1081px) {
@@ -2655,6 +2752,57 @@ select.input {
 
   .player-panel {
     position: static;
+  }
+
+  /* 目录 / 播放两模式：只用 display 切换，<video> 始终留在 DOM 中，转屏 / 切换断点不会重载 */
+  .pane-nav {
+    position: sticky;
+    top: calc(var(--topbar-h) + 6px);
+    z-index: 30;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    gap: 4px;
+    padding: 4px;
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    background: rgba(27, 24, 20, 0.94);
+    box-shadow: var(--shadow-1);
+    -webkit-backdrop-filter: saturate(140%) blur(12px);
+    backdrop-filter: saturate(140%) blur(12px);
+  }
+
+  /* 目录模式：播放区只保留投屏状态（有投屏时），其余收起；未播放时直接展示目录 */
+  .player-view[data-pane="browser"] .player-panel:not(.has-cast) {
+    display: none;
+  }
+
+  .player-view[data-pane="browser"] .player-panel > :not(.cast-status) {
+    display: none;
+  }
+
+  /* 仅剩投屏卡片时去掉外层面板（也不做通栏），卡片自带边框与底色 */
+  .player-view[data-pane="browser"] .player-panel {
+    margin: 0;
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+    box-shadow: none;
+    overflow: visible;
+  }
+
+  .player-view[data-pane="browser"] .player-panel > .cast-status {
+    margin: 0;
+  }
+
+  /* 播放模式：收起目录与片库切换条（片库提示仍可见） */
+  .player-view[data-pane="player"] .browser-panel,
+  .player-view[data-pane="player"] .shelf-bar {
+    display: none;
+  }
+
+  /* 翻页后滚动到列表顶部时避开吸顶栏与模式切换条 */
+  .entry-list {
+    scroll-margin-top: calc(var(--topbar-h) + 72px);
   }
 
   /* 未选择视频时收起 16:9 大屏，把空间留给目录 */
@@ -2796,6 +2944,29 @@ select.input {
     border-left: 0;
     border-right: 0;
     border-radius: 0;
+  }
+
+
+  .shelf-title {
+    font-size: 16px;
+  }
+
+  .pane-tab {
+    min-height: 46px;
+  }
+
+  /* 长中 / 英文名最多显示三行（完整名称仍在 DOM 中供读屏，播放后在播放区完整展示） */
+  .entry-name {
+    display: -webkit-box;
+    overflow: hidden;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 3;
+    line-clamp: 3;
+  }
+
+  .btn.pager-btn {
+    min-height: 44px;
+    padding: 0 var(--s3);
   }
 
   .player-panel.is-idle .player-placeholder {

@@ -6,6 +6,12 @@
 
   const gate = U.createRequestGate();
 
+  // 目录列表每页条数：每次重绘只创建当前页的行，长目录（后端同目录至多 5000 项）也不会累积 DOM
+  const BROWSER_PAGE_SIZE = 40;
+  // 与 styles.css 中单栏布局断点一致：窄屏下目录 / 播放为两个模式，宽屏为左右双栏
+  const compactQuery =
+    typeof window.matchMedia === 'function' ? window.matchMedia('(max-width: 1080px)') : null;
+
   const state = {
     currentUser: null,
     activeView: 'player',
@@ -14,6 +20,16 @@
     currentPath: '',
     currentEntries: [],
     filterQuery: '',
+    // 当前筛选结果的页码（0 起）；仅切换目录 / 调整筛选时回到第一页，其他重绘保持不变
+    browserPage: 0,
+    browserPageCount: 0,
+    // 窄屏模式：'browser' 目录 / 'player' 播放。只改变显示，不重载、不暂停视频
+    pane: 'browser',
+    // 离开目录模式时记下的页面滚动位置与要恢复焦点的行（null 表示未记录）
+    browseScrollY: null,
+    returnFocusKey: '',
+    // 是否为“播放”模式压入了一条同文档历史记录（手机返回手势可一步回到目录）
+    paneHistoryPushed: false,
     isBrowsing: false,
     browseVersion: 0,
     libraryDirty: false,
@@ -79,6 +95,19 @@
   const browserLoading = document.getElementById('browser-loading');
   const browserEmpty = document.getElementById('browser-empty');
   const browserList = document.getElementById('browser-list');
+  const browserPanel = document.getElementById('browser-panel');
+  const browserHeading = document.getElementById('browser-heading');
+  const browserPager = document.getElementById('browser-pager');
+  const pagerPrevBtn = document.getElementById('pager-prev-btn');
+  const pagerNextBtn = document.getElementById('pager-next-btn');
+  const pagerPage = document.getElementById('pager-page');
+  const pagerRange = document.getElementById('pager-range');
+
+  // 窄屏目录 / 播放切换
+  const paneNav = document.getElementById('pane-nav');
+  const paneBrowserBtn = document.getElementById('pane-browser-btn');
+  const panePlayerBtn = document.getElementById('pane-player-btn');
+  const paneCastTag = document.getElementById('pane-cast-tag');
 
   // 原生播放器
   const playerGrid = document.getElementById('player-grid');
@@ -187,9 +216,105 @@
     playerGrid.hidden = !hasContent;
   }
 
+  function isCompactLayout() {
+    return Boolean(compactQuery && compactQuery.matches);
+  }
+
+  // 窄屏模式仅通过 #player-view[data-pane] 与样式切换显示；视频元素始终留在 DOM 中继续播放。
+  // 没有载入影片时一律显示目录；投屏状态在两种模式下都可见（player-panel.has-cast）。
+  function renderPaneNav() {
+    const hasVideo = Boolean(state.activeVideo);
+    const pane = hasVideo ? state.pane : 'browser';
+    playerView.setAttribute('data-pane', pane);
+    paneNav.hidden = !hasVideo;
+    paneBrowserBtn.setAttribute('aria-pressed', pane === 'browser' ? 'true' : 'false');
+    panePlayerBtn.setAttribute('aria-pressed', pane === 'player' ? 'true' : 'false');
+    playerPanel.classList.toggle('has-cast', Boolean(state.cast.session));
+    paneCastTag.hidden = !state.cast.session;
+  }
+
+  function findBrowserFocusTarget(key) {
+    if (!key) {
+      return null;
+    }
+    // 路径可能含任意字符，逐个比对 dataset 而不拼 CSS 选择器（当前页至多两倍页容量个节点）
+    const nodes = browserList.querySelectorAll('[data-focus-key]');
+    for (let i = 0; i < nodes.length; i += 1) {
+      if (nodes[i].dataset.focusKey === key) {
+        return nodes[i];
+      }
+    }
+    return null;
+  }
+
+  function showPlayerPane() {
+    if (state.pane === 'player') {
+      renderPaneNav();
+      return;
+    }
+    const compact = isCompactLayout();
+    state.browseScrollY = compact ? window.scrollY || window.pageYOffset || 0 : null;
+    state.pane = 'player';
+    renderPaneNav();
+    if (!compact || !state.activeVideo) {
+      return;
+    }
+    if (!state.paneHistoryPushed && window.history && typeof window.history.pushState === 'function') {
+      try {
+        window.history.pushState({ swpPane: 'player' }, '');
+        state.paneHistoryPushed = true;
+      } catch (e) {
+        state.paneHistoryPushed = false;
+      }
+    }
+    window.scrollTo(0, 0);
+    playerHeading.focus({ preventScroll: true });
+  }
+
+  // options.fromHistory：由返回手势触发（历史记录已弹出）；options.restoreFocus === false 时不移动焦点
+  function showBrowserPane(options) {
+    const opts = options || {};
+    if (state.paneHistoryPushed) {
+      // 先清标记再回退，由此产生的 popstate 会被忽略，保证历史里不残留多余记录
+      state.paneHistoryPushed = false;
+      if (!opts.fromHistory) {
+        try {
+          window.history.back();
+        } catch (e) {
+          // 忽略：历史不可用时仅切换显示
+        }
+      }
+    }
+    if (state.pane === 'browser') {
+      renderPaneNav();
+      return;
+    }
+    state.pane = 'browser';
+    renderPaneNav();
+    if (!isCompactLayout()) {
+      return;
+    }
+    const savedY = state.browseScrollY;
+    state.browseScrollY = null;
+    if (savedY !== null) {
+      window.scrollTo(0, savedY);
+    }
+    if (opts.restoreFocus === false) {
+      return;
+    }
+    const target = findBrowserFocusTarget(state.returnFocusKey);
+    if (target) {
+      target.focus({ preventScroll: savedY !== null });
+    } else if (!paneNav.contains(document.activeElement) || paneNav.hidden) {
+      browserHeading.focus({ preventScroll: savedY !== null });
+    }
+  }
+
   function stopAndResetPlayer() {
     // 若焦点在即将隐藏的影片操作区，先把焦点安置到播放区标题，避免丢到 body
     const hadActionFocus = playerActions.contains(document.activeElement);
+    const hadPlayerFocus = playerPanel.contains(document.activeElement);
+    const leavingPlayerPane = state.pane === 'player' && isCompactLayout();
     resetPlayerDownload();
     state.playbackToken += 1;
     state.activeVideo = null;
@@ -217,7 +342,9 @@
     renderBrowserEntries();
     renderCastStatus();
     syncPlayerGridVisibility();
-    if (hadActionFocus) {
+    // 窄屏关闭影片后回到目录模式，恢复离开时的滚动位置；焦点原在播放区时安置回对应的行
+    showBrowserPane({ restoreFocus: leavingPlayerPane && hadPlayerFocus });
+    if (hadActionFocus && !leavingPlayerPane) {
       playerHeading.focus({ preventScroll: true });
     }
   }
@@ -281,10 +408,8 @@
 
     renderBrowserEntries();
     renderCastStatus();
-
-    if (window.innerWidth <= 1080) {
-      videoEl.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-    }
+    // 窄屏切到播放模式（宽屏双栏无可见变化）；不改变目录路径 / 筛选 / 页码
+    showPlayerPane();
   }
 
   function buildMediaErrorMessage(mediaError) {
@@ -611,6 +736,7 @@
 
   function renderCastStatus() {
     renderCastButton();
+    renderPaneNav();
     const session = state.cast.session;
     if (!session) {
       castStatusBox.hidden = true;
@@ -1076,7 +1202,7 @@
       if (generation === state.cast.generation) {
         renderCastStatus();
         if (hadFocus && castStatusBox.hidden) {
-          (state.activeVideo && !playerActions.hidden ? playerCastBtn : playerHeading).focus({ preventScroll: true });
+          focusAfterCastStatusHidden();
         }
       }
     }
@@ -1094,8 +1220,17 @@
     renderCastStatus();
     U.showToast('已隐藏该投屏记录；如电视仍在播放，请用遥控器停止', 'info');
     if (hadFocus) {
-      (state.activeVideo && !playerActions.hidden ? playerCastBtn : playerHeading).focus({ preventScroll: true });
+      focusAfterCastStatusHidden();
     }
+  }
+
+  // 投屏卡片收起后安置焦点：窄屏目录模式下播放区不可见，改落到目录标题
+  function focusAfterCastStatusHidden() {
+    if (isCompactLayout() && playerView.getAttribute('data-pane') === 'browser') {
+      browserHeading.focus({ preventScroll: true });
+      return;
+    }
+    (state.activeVideo && !playerActions.hidden ? playerCastBtn : playerHeading).focus({ preventScroll: true });
   }
 
   playerCastBtn.addEventListener('click', openCastDialog);
@@ -1139,6 +1274,7 @@
     state.currentPath = '';
     state.currentEntries = [];
     state.filterQuery = '';
+    state.browserPage = 0;
     browserFilterInput.value = '';
     browserFilterInput.disabled = true;
     browserLoading.hidden = true;
@@ -1267,6 +1403,7 @@
       activeEl && browserList.contains(activeEl) && activeEl.dataset ? activeEl.dataset.focusKey || '' : '';
     let focusTarget = null;
     browserList.replaceChildren();
+    hidePager();
     const root = findRootById(state.selectedRootId);
     if (!root) {
       browserSummary.textContent =
@@ -1325,6 +1462,7 @@
           on: {
             click: function () {
               state.filterQuery = '';
+              state.browserPage = 0;
               browserFilterInput.value = '';
               renderBrowserEntries();
               browserFilterInput.focus();
@@ -1338,7 +1476,19 @@
 
     browserEmpty.hidden = true;
 
-    for (let i = 0; i < filtered.length; i += 1) {
+    // 只创建当前页的行；筛选结果变少导致页码越界时收到最后一页
+    const pageCount = Math.max(1, Math.ceil(filtered.length / BROWSER_PAGE_SIZE));
+    if (!(state.browserPage >= 0)) {
+      state.browserPage = 0;
+    }
+    if (state.browserPage > pageCount - 1) {
+      state.browserPage = pageCount - 1;
+    }
+    const pageStart = state.browserPage * BROWSER_PAGE_SIZE;
+    const pageEnd = Math.min(filtered.length, pageStart + BROWSER_PAGE_SIZE);
+    renderPager(pageCount, pageStart, pageEnd, filtered.length);
+
+    for (let i = pageStart; i < pageEnd; i += 1) {
       const entry = filtered[i];
       const isDir = entry.kind === 'directory';
       const isPlaying =
@@ -1382,6 +1532,8 @@
               if (isDir) {
                 browseDirectory(root.id, entry.path);
               } else {
+                // 窄屏从播放返回目录时，把焦点放回这一行
+                state.returnFocusKey = rowFocusKey;
                 playVideo(root, entry);
               }
             },
@@ -1449,6 +1601,59 @@
     }
   }
 
+  function hidePager() {
+    state.browserPageCount = 0;
+    browserPager.hidden = true;
+  }
+
+  function setText(node, text) {
+    // 内容未变时不重写，避免屏幕阅读器在与分页无关的重绘时重复播报
+    if (node.textContent !== text) {
+      node.textContent = text;
+    }
+  }
+
+  function renderPager(pageCount, start, end, total) {
+    state.browserPageCount = pageCount;
+    if (pageCount <= 1) {
+      browserPager.hidden = true;
+      return;
+    }
+    const atFirst = state.browserPage <= 0;
+    const atLast = state.browserPage >= pageCount - 1;
+    setText(pagerPage, '第 ' + (state.browserPage + 1) + ' / ' + pageCount + ' 页');
+    setText(pagerRange, '第 ' + (start + 1) + '–' + end + ' 项，共 ' + total + ' 项');
+    // 用 aria-disabled 而非 disabled：翻到首 / 末页时键盘焦点仍留在按钮上
+    pagerPrevBtn.setAttribute('aria-disabled', atFirst ? 'true' : 'false');
+    pagerNextBtn.setAttribute('aria-disabled', atLast ? 'true' : 'false');
+    browserPager.hidden = false;
+  }
+
+  function goToBrowserPage(delta) {
+    if (state.isBrowsing || state.browserPageCount <= 1) {
+      return;
+    }
+    const target = Math.min(state.browserPageCount - 1, Math.max(0, state.browserPage + delta));
+    if (target === state.browserPage) {
+      return;
+    }
+    state.browserPage = target;
+    renderBrowserEntries();
+    // 新的一页从顶部开始看：宽屏列表在栏内滚动，窄屏整页滚动；焦点留在分页按钮以便连续翻页
+    browserList.scrollTop = 0;
+    if (isCompactLayout()) {
+      browserList.scrollIntoView({ block: 'start' });
+    }
+  }
+
+  pagerPrevBtn.addEventListener('click', function () {
+    goToBrowserPage(-1);
+  });
+
+  pagerNextBtn.addEventListener('click', function () {
+    goToBrowserPage(1);
+  });
+
   // 从真实文件名取扩展名作为格式标签（不推测编码、不伪造时长）
   function getFileExtLabel(name) {
     const text = String(name || '');
@@ -1471,9 +1676,11 @@
     state.currentPath = relPath || '';
     state.currentEntries = [];
     state.filterQuery = '';
+    state.browserPage = 0;
     state.isBrowsing = true;
     browserFilterInput.value = '';
     browserFilterInput.disabled = true;
+    hidePager();
 
     renderRootsBar();
     renderBreadcrumbs();
@@ -1563,6 +1770,8 @@
         state.selectedRootId = null;
         state.currentPath = '';
         state.currentEntries = [];
+        state.filterQuery = '';
+        state.browserPage = 0;
         browserFilterInput.value = '';
         browserFilterInput.disabled = true;
         renderRootsBar();
@@ -1730,8 +1939,55 @@
       return;
     }
     state.filterQuery = browserFilterInput.value;
+    // 筛选覆盖整个已取得目录，结果变化后从第一页看起
+    state.browserPage = 0;
     renderBrowserEntries();
   });
+
+  // ---------- 窄屏：目录 / 播放切换 ----------
+  paneBrowserBtn.addEventListener('click', function () {
+    showBrowserPane();
+  });
+
+  panePlayerBtn.addEventListener('click', function () {
+    if (state.activeVideo) {
+      showPlayerPane();
+    }
+  });
+
+  // 手机返回手势 / 按键：弹出本应用压入的“播放”记录时回到目录，视频不停
+  window.addEventListener('popstate', function (event) {
+    if (!state.paneHistoryPushed) {
+      return;
+    }
+    if (event.state && event.state.swpPane === 'player') {
+      return;
+    }
+    showBrowserPane({ fromHistory: true });
+  });
+
+  // 断点 / 横竖屏切换只调整模式显示，绝不触碰视频元素与投屏状态；模式跟随键盘焦点所在的一栏，避免焦点落入隐藏区域
+  function handleCompactChange() {
+    if (!isCompactLayout() || !state.activeVideo) {
+      return;
+    }
+    const active = document.activeElement;
+    if (state.pane === 'player' && browserPanel.contains(active)) {
+      state.pane = 'browser';
+      renderPaneNav();
+    } else if (state.pane === 'browser' && playerPanel.contains(active) && !castStatusBox.contains(active)) {
+      state.pane = 'player';
+      renderPaneNav();
+    }
+  }
+
+  if (compactQuery) {
+    if (typeof compactQuery.addEventListener === 'function') {
+      compactQuery.addEventListener('change', handleCompactChange);
+    } else if (typeof compactQuery.addListener === 'function') {
+      compactQuery.addListener(handleCompactChange);
+    }
+  }
 
   // ---------- 视图切换 ----------
   function switchView(viewName, preferredRootId) {
@@ -1778,6 +2034,7 @@
     state.currentPath = '';
     state.currentEntries = [];
     state.filterQuery = '';
+    state.browserPage = 0;
     state.isBrowsing = false;
     stopAndResetPlayer();
     state.libraryDirty = false;
@@ -1792,6 +2049,7 @@
     rootsBar.classList.remove('is-empty');
     renderBreadcrumbs();
     browserList.replaceChildren();
+    hidePager();
     browserEmpty.replaceChildren();
     browserEmpty.hidden = true;
     browserSummary.textContent = '';

@@ -152,7 +152,7 @@
 
     <main id="main-content" class="main-content" tabindex="-1">
       <!-- 片库与播放视图 -->
-      <section id="player-view" class="view-section player-view" aria-label="片库与播放">
+      <section id="player-view" class="view-section player-view" data-pane="browser" aria-label="片库与播放">
         <!-- 授权目录：紧凑片库切换条 -->
         <section class="shelf" aria-labelledby="roots-heading">
           <div class="shelf-bar">
@@ -162,6 +162,21 @@
           </div>
           <div id="roots-alert" class="alert alert-error" role="alert" hidden></div>
         </section>
+
+        <!-- 窄屏（≤1080px）：目录 / 播放 两模式切换；宽屏双栏时由样式隐藏。仅在已载入影片时出现 -->
+        <div id="pane-nav" class="pane-nav" role="group" aria-label="切换目录与播放" hidden>
+          <button id="pane-browser-btn" type="button" class="pane-tab" aria-pressed="true" aria-controls="browser-panel">
+            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7z"></path>
+            </svg>
+            <span>目录</span>
+          </button>
+          <button id="pane-player-btn" type="button" class="pane-tab" aria-pressed="false" aria-controls="player-panel">
+            <span class="eq pane-eq" aria-hidden="true"><i></i><i></i><i></i></span>
+            <span>播放</span>
+            <span id="pane-cast-tag" class="pane-cast-tag" hidden>投屏中</span>
+          </button>
+        </div>
 
         <!-- 主体：播放器 + 目录浏览 -->
         <div id="player-grid" class="player-grid">
@@ -271,10 +286,10 @@
             </details>
           </section>
 
-          <section class="panel browser-panel" aria-labelledby="browser-heading">
+          <section id="browser-panel" class="panel browser-panel" aria-labelledby="browser-heading">
             <div class="panel-header panel-header-compact">
               <div class="min-w-0">
-                <h2 id="browser-heading" class="panel-title">目录浏览</h2>
+                <h2 id="browser-heading" class="panel-title" tabindex="-1">目录浏览</h2>
                 <p id="browser-summary" class="panel-desc">请选择一个已授权目录</p>
               </div>
               <div class="btn-row">
@@ -311,6 +326,26 @@
 
             <div id="browser-empty" class="empty-state" hidden></div>
             <ul id="browser-list" class="entry-list" aria-label="目录与视频列表"></ul>
+
+            <!-- 分页：按当前筛选结果每页固定条数，页码 / 范围随列表重绘更新 -->
+            <nav id="browser-pager" class="pager" aria-label="目录分页" hidden>
+              <button id="pager-prev-btn" type="button" class="btn btn-secondary btn-sm pager-btn" aria-label="上一页">
+                <svg class="pager-icon-prev" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <polyline points="15 6 9 12 15 18"></polyline>
+                </svg>
+                <span aria-hidden="true">上一页</span>
+              </button>
+              <p id="pager-status" class="pager-status" role="status" aria-live="polite" aria-atomic="true">
+                <span id="pager-page" class="pager-page"></span>
+                <span id="pager-range" class="pager-range"></span>
+              </p>
+              <button id="pager-next-btn" type="button" class="btn btn-secondary btn-sm pager-btn" aria-label="下一页">
+                <span aria-hidden="true">下一页</span>
+                <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <polyline points="9 6 15 12 9 18"></polyline>
+                </svg>
+              </button>
+            </nav>
           </section>
         </div>
       </section>

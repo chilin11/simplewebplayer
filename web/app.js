@@ -81,6 +81,9 @@
   const browserList = document.getElementById('browser-list');
 
   // 原生播放器
+  const playerGrid = document.getElementById('player-grid');
+  const playerPanel = document.getElementById('player-panel');
+  const nowPlayingBox = document.getElementById('now-playing');
   const videoEl = document.getElementById('video-player');
   const playerPlaceholder = document.getElementById('player-placeholder');
   const playerHeading = document.getElementById('player-heading');
@@ -176,6 +179,14 @@
     navAdminBtn.hidden = !isAdmin;
   }
 
+  function syncPlayerGridVisibility() {
+    if (!playerGrid) {
+      return;
+    }
+    const hasContent = state.roots.length > 0 || Boolean(state.activeVideo) || Boolean(state.cast.session);
+    playerGrid.hidden = !hasContent;
+  }
+
   function stopAndResetPlayer() {
     // 若焦点在即将隐藏的影片操作区，先把焦点安置到播放区标题，避免丢到 body
     const hadActionFocus = playerActions.contains(document.activeElement);
@@ -194,15 +205,18 @@
     }
     videoEl.hidden = true;
     playerPlaceholder.hidden = false;
+    playerPanel.classList.add('is-idle');
+    nowPlayingBox.hidden = true;
     playerActions.hidden = true;
-    playerNowTitle.textContent = '尚未选择视频';
+    playerNowTitle.textContent = '';
     playerLocation.hidden = true;
     playerLocationText.textContent = '';
-    playerCurrentMeta.textContent = '在目录中点选视频即可播放或下载';
-    playerCurrentMeta.hidden = false;
+    playerCurrentMeta.textContent = '';
+    playerCurrentMeta.hidden = true;
     U.clearAlert(playerErrorBox);
     renderBrowserEntries();
     renderCastStatus();
+    syncPlayerGridVisibility();
     if (hadActionFocus) {
       playerHeading.focus({ preventScroll: true });
     }
@@ -248,8 +262,11 @@
     renderNowMeta(entry);
 
     playerPlaceholder.hidden = true;
+    playerPanel.classList.remove('is-idle');
+    nowPlayingBox.hidden = false;
     videoEl.hidden = false;
     playerActions.hidden = false;
+    syncPlayerGridVisibility();
 
     state.isUnloadingVideo = false;
     videoEl.src = streamUrl;
@@ -265,7 +282,7 @@
     renderBrowserEntries();
     renderCastStatus();
 
-    if (window.innerWidth <= 1024) {
+    if (window.innerWidth <= 1080) {
       videoEl.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
     }
   }
@@ -600,6 +617,7 @@
       castStatusDevice.textContent = '';
       castStatusFile.textContent = '';
       U.clearAlert(castStopAlert);
+      syncPlayerGridVisibility();
       return;
     }
     const stopping = state.cast.stoppingCastId === session.castId;
@@ -621,6 +639,7 @@
     castStopBtn.setAttribute('aria-disabled', stopping ? 'true' : 'false');
     castStopLabel.textContent = stopping ? '正在停止…' : '停止投屏';
     castStatusBox.hidden = false;
+    syncPlayerGridVisibility();
   }
 
   // 退出登录 / 会话失效：只清本地状态，并让所有在途的投屏请求失效
@@ -1134,14 +1153,16 @@
   // ---------- 目录浏览与面包屑 ----------
   function renderRootsBar() {
     rootsBar.replaceChildren();
-    if (state.roots.length === 0) {
+    const isEmpty = state.roots.length === 0;
+    rootsBar.classList.toggle('is-empty', isEmpty);
+    if (isEmpty) {
       const isAdmin = state.currentUser && state.currentUser.role === 'admin';
       const emptyNodes = [
         U.el('p', { className: 'empty-state-title', text: isAdmin ? '片库还没有目录' : '当前账号还没有目录授权' }),
         U.el('p', {
           className: 'empty-state-desc',
           text: isAdmin
-            ? '在管理台保存 NAS 共享后，添加一个授权目录即可浏览。管理员无需为自己分配权限。'
+            ? '在管理台配置 NAS 共享并添加目录后即可浏览；管理员默认可见全部目录，无需额外授权。'
             : '当前账号尚未获得任何目录授权，请联系管理员为您分配目录权限。',
         }),
       ];
@@ -1161,6 +1182,7 @@
         );
       }
       rootsBar.appendChild(U.el('div', { className: 'empty-state empty-state-wide' }, emptyNodes));
+      syncPlayerGridVisibility();
       return;
     }
 
@@ -1181,12 +1203,13 @@
           },
         },
         [
-          U.el('span', { className: 'root-chip-icon' }, U.createIcon('harddrive', 18)),
+          U.el('span', { className: 'root-chip-icon' }, U.createIcon('harddrive', 16)),
           U.el('span', { className: 'root-chip-label', text: root.label }),
         ]
       );
       rootsBar.appendChild(chip);
     }
+    syncPlayerGridVisibility();
   }
 
   function renderBreadcrumbs() {
@@ -1374,11 +1397,13 @@
             U.el('span', { className: 'entry-name', text: entry.name }),
             U.el('span', { className: 'entry-meta' }, metaNodes),
           ]),
-          U.el(
-            'span',
-            { className: 'entry-tail', attrs: { 'aria-hidden': 'true' } },
-            U.createIcon(isDir ? 'chevron' : 'play', 16)
-          ),
+          isDir
+            ? U.el(
+                'span',
+                { className: 'entry-tail', attrs: { 'aria-hidden': 'true' } },
+                U.createIcon('chevron', 16)
+              )
+            : null,
         ]
       );
 
@@ -1764,6 +1789,7 @@
     browserFilterInput.value = '';
     browserFilterInput.disabled = true;
     rootsBar.replaceChildren();
+    rootsBar.classList.remove('is-empty');
     renderBreadcrumbs();
     browserList.replaceChildren();
     browserEmpty.replaceChildren();

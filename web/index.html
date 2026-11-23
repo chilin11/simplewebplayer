@@ -152,23 +152,21 @@
 
     <main id="main-content" class="main-content" tabindex="-1">
       <!-- 片库与播放视图 -->
-      <section id="player-view" class="view-section" aria-label="片库与播放">
-        <!-- 授权目录：片库书架 -->
+      <section id="player-view" class="view-section player-view" aria-label="片库与播放">
+        <!-- 授权目录：紧凑片库切换条 -->
         <section class="shelf" aria-labelledby="roots-heading">
-          <div class="shelf-head">
-            <div class="min-w-0">
-              <p class="eyebrow">家庭片库</p>
-              <h1 id="roots-heading" class="page-title">我的片库</h1>
-            </div>
-            <button id="refresh-roots-btn" type="button" class="btn btn-secondary btn-sm">刷新片库</button>
+          <div class="shelf-bar">
+            <h1 id="roots-heading" class="shelf-title">我的片库</h1>
+            <div id="roots-bar" class="roots-bar" role="navigation" aria-label="已授权目录"></div>
+            <button id="refresh-roots-btn" type="button" class="btn btn-ghost btn-sm shelf-refresh-btn">刷新片库</button>
           </div>
           <div id="roots-alert" class="alert alert-error" role="alert" hidden></div>
-          <div id="roots-bar" class="roots-bar" role="navigation" aria-label="已授权目录"></div>
         </section>
 
         <!-- 主体：播放器 + 目录浏览 -->
-        <div class="player-grid">
-          <section class="panel player-panel" aria-labelledby="player-heading">
+        <div id="player-grid" class="player-grid">
+          <section id="player-panel" class="panel player-panel is-idle" aria-labelledby="player-heading">
+            <h2 id="player-heading" class="sr-only" tabindex="-1">视频播放器</h2>
             <div class="video-stage">
               <video
                 id="video-player"
@@ -181,52 +179,59 @@
 
               <div id="player-placeholder" class="player-placeholder">
                 <div class="placeholder-icon" aria-hidden="true">
-                  <svg viewBox="0 0 32 32" width="40" height="40" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                  <svg viewBox="0 0 32 32" width="36" height="36" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
                     <rect x="4" y="6" width="24" height="20" rx="3"></rect>
                     <line x1="9" y1="6" x2="9" y2="26"></line>
                     <line x1="23" y1="6" x2="23" y2="26"></line>
                     <polygon points="14 12.5 19 16 14 19.5 14 12.5"></polygon>
                   </svg>
                 </div>
-                <p class="placeholder-title">还没有选择视频</p>
-                <p class="placeholder-sub">在目录中点选一个视频文件，就会在这里播放</p>
+                <div class="placeholder-copy">
+                  <p class="placeholder-title">选择影片开始播放</p>
+                  <p class="placeholder-sub">在目录列表中点选视频即可原生播放、下载原片或投屏到电视</p>
+                </div>
               </div>
             </div>
 
-            <div class="now-playing">
-              <div class="now-playing-text min-w-0">
-                <h2 id="player-heading" class="eyebrow now-eyebrow" tabindex="-1">当前影片</h2>
-                <p id="player-now-title" class="now-title">尚未选择视频</p>
-                <p id="player-location" class="now-location" hidden>
-                  <svg class="now-location-icon" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                    <path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7z"></path>
-                  </svg>
-                  <span class="sr-only">所在目录：</span>
-                  <span id="player-location-text" class="now-location-text"></span>
-                </p>
-                <p id="player-current-meta" class="now-meta">在目录中点选视频即可播放或下载</p>
+            <div id="now-playing" class="now-playing" hidden>
+              <div class="now-playing-info min-w-0">
+                <p id="player-now-title" class="now-title"></p>
+                <div class="now-playing-sub">
+                  <p id="player-location" class="now-location" hidden>
+                    <svg class="now-location-icon" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                      <path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7z"></path>
+                    </svg>
+                    <span class="sr-only">所在目录：</span>
+                    <span id="player-location-text" class="now-location-text"></span>
+                  </p>
+                  <p id="player-current-meta" class="now-meta" hidden></p>
+                </div>
               </div>
               <div id="player-actions" class="now-actions" role="group" aria-label="当前影片操作" hidden>
-                <button id="player-download-btn" type="button" class="btn btn-primary btn-sm now-download-btn" aria-describedby="player-now-title">
-                  <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
-                    <polyline points="7 10 12 15 17 10"></polyline>
-                    <line x1="12" y1="15" x2="12" y2="3"></line>
-                  </svg>
-                  <span id="player-download-label">下载原视频</span>
-                </button>
-                <button id="player-cast-btn" type="button" class="btn btn-secondary btn-sm now-cast-btn" aria-haspopup="dialog" aria-describedby="player-now-title">
-                  <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                    <path d="M2 8V6a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-6"></path>
-                    <path d="M2 12a9 9 0 0 1 8 8"></path>
-                    <path d="M2 16a5 5 0 0 1 4 4"></path>
-                    <line x1="2" y1="20" x2="2.01" y2="20"></line>
-                  </svg>
-                  <span id="player-cast-label">投屏到电视</span>
-                  <span id="player-cast-live" class="cast-live-dot" hidden></span>
-                </button>
-                <button id="player-reload-btn" type="button" class="btn btn-secondary btn-sm">重新加载</button>
-                <button id="player-close-btn" type="button" class="btn btn-ghost btn-sm">关闭视频</button>
+                <div class="now-actions-primary">
+                  <button id="player-download-btn" type="button" class="btn btn-primary btn-sm now-download-btn" aria-describedby="player-now-title">
+                    <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                      <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                      <polyline points="7 10 12 15 17 10"></polyline>
+                      <line x1="12" y1="15" x2="12" y2="3"></line>
+                    </svg>
+                    <span id="player-download-label">下载原视频</span>
+                  </button>
+                  <button id="player-cast-btn" type="button" class="btn btn-secondary btn-sm now-cast-btn" aria-haspopup="dialog" aria-describedby="player-now-title">
+                    <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                      <path d="M2 8V6a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-6"></path>
+                      <path d="M2 12a9 9 0 0 1 8 8"></path>
+                      <path d="M2 16a5 5 0 0 1 4 4"></path>
+                      <line x1="2" y1="20" x2="2.01" y2="20"></line>
+                    </svg>
+                    <span id="player-cast-label">投屏到电视</span>
+                    <span id="player-cast-live" class="cast-live-dot" hidden></span>
+                  </button>
+                </div>
+                <div class="now-actions-secondary">
+                  <button id="player-reload-btn" type="button" class="btn btn-ghost btn-sm">重新加载</button>
+                  <button id="player-close-btn" type="button" class="btn btn-ghost btn-sm">关闭视频</button>
+                </div>
               </div>
             </div>
 
@@ -316,7 +321,7 @@
           <div>
             <p class="eyebrow">仅管理员可见</p>
             <h1 class="page-title">管理台</h1>
-            <p class="page-subtitle">保存 NAS 共享，添加授权目录，即可在片库浏览。要让家人访问，再为普通账号分配目录。</p>
+            <p class="page-subtitle">保存 NAS 共享后，在「权限」中统一添加授权目录、管理账号并为普通账号分配可见目录。</p>
           </div>
 
           <div class="tab-bar" role="tablist" aria-label="管理台分区">
@@ -328,6 +333,7 @@
               data-admin-tab="nas"
               aria-selected="true"
               aria-controls="admin-panel-nas"
+              tabindex="0"
             >
               <span class="tab-index" aria-hidden="true">1</span>
               <span class="tab-text">
@@ -336,33 +342,19 @@
               </span>
             </button>
             <button
-              id="admin-tab-roots"
+              id="admin-tab-permissions"
               type="button"
               role="tab"
               class="tab-btn"
-              data-admin-tab="roots"
+              data-admin-tab="permissions"
               aria-selected="false"
-              aria-controls="admin-panel-roots"
+              aria-controls="admin-panel-permissions"
+              tabindex="-1"
             >
               <span class="tab-index" aria-hidden="true">2</span>
               <span class="tab-text">
-                <span class="tab-label">授权目录</span>
-                <span class="tab-hint">共享内可被授权的根目录</span>
-              </span>
-            </button>
-            <button
-              id="admin-tab-users"
-              type="button"
-              role="tab"
-              class="tab-btn"
-              data-admin-tab="users"
-              aria-selected="false"
-              aria-controls="admin-panel-users"
-            >
-              <span class="tab-index" aria-hidden="true">3</span>
-              <span class="tab-text">
-                <span class="tab-label">账号与权限</span>
-                <span class="tab-hint">登录账号与可见目录</span>
+                <span class="tab-label">权限</span>
+                <span class="tab-hint">授权目录、账号与目录分配</span>
               </span>
             </button>
           </div>
@@ -453,7 +445,7 @@
                   <label for="nas-share-manual" class="field-label">共享文件夹名称</label>
                   <input id="nas-share-manual" type="text" class="input" placeholder="例如 video" autocapitalize="off" spellcheck="false" aria-describedby="nas-share-hint">
                 </div>
-                <p id="nas-share-hint" class="field-hint">群晖 DSM「控制面板 → 共享文件夹」中的顶层名称，例如 <code>video</code>，不是 <code>/volume1/video</code>。子目录在「授权目录」内选择。</p>
+                <p id="nas-share-hint" class="field-hint">群晖 DSM「控制面板 → 共享文件夹」中的顶层名称，例如 <code>video</code>，不是 <code>/volume1/video</code>。子目录在「权限 → 授权目录」内选择。</p>
               </fieldset>
               <div class="form-actions form-actions-bar">
                 <button id="nas-save-btn" type="submit" class="btn btn-secondary">保存配置</button>
@@ -467,164 +459,197 @@
           </div>
         </section>
 
-        <!-- 分区 2：授权目录（根）管理 -->
+        <!-- 分区 2：权限（授权目录 + 账号与授权同页） -->
         <section
-          id="admin-panel-roots"
+          id="admin-panel-permissions"
           class="admin-panel"
           role="tabpanel"
-          aria-labelledby="admin-tab-roots"
+          aria-labelledby="admin-tab-permissions"
           hidden
         >
-          <div class="admin-two-col">
-            <div class="panel panel-form">
-              <div class="panel-header">
-                <div>
-                  <h2 class="panel-title">新增授权目录</h2>
-                  <p class="panel-desc">从 SMB 共享中指定一个目录，之后可以把它分配给账号。</p>
-                </div>
+          <div class="perm-workspace">
+            <nav class="perm-jump-bar" aria-label="权限页快速定位">
+              <span class="perm-jump-label">同页定位</span>
+              <div class="perm-jump-actions">
+                <button
+                  id="perm-jump-roots-btn"
+                  type="button"
+                  class="btn btn-secondary btn-sm perm-jump-btn"
+                  data-perm-jump="roots"
+                >
+                  <span>授权目录</span>
+                  <span id="perm-jump-roots-count" class="perm-jump-count" hidden></span>
+                </button>
+                <button
+                  id="perm-jump-users-btn"
+                  type="button"
+                  class="btn btn-secondary btn-sm perm-jump-btn"
+                  data-perm-jump="users"
+                >
+                  <span>账号与授权</span>
+                  <span id="perm-jump-users-count" class="perm-jump-count" hidden></span>
+                </button>
+              </div>
+            </nav>
+
+            <!-- 区域 1：授权目录 -->
+            <section id="admin-section-roots" class="perm-section" aria-labelledby="admin-section-roots-heading">
+              <div class="perm-section-head">
+                <h2 id="admin-section-roots-heading" class="perm-section-title" tabindex="-1">授权目录</h2>
+                <p class="perm-section-desc">从 SMB 共享中指定可浏览的根目录；管理员可直接访问全部目录，普通账号可在下方区域分配可见目录。</p>
               </div>
 
-              <div id="root-create-alert" class="alert" role="alert" hidden></div>
-
-              <form id="root-create-form" class="form-stack" novalidate>
-                <div class="field">
-                  <label for="root-create-label" class="field-label">显示名称<span class="req" aria-hidden="true">*</span></label>
-                  <input
-                    id="root-create-label"
-                    name="label"
-                    type="text"
-                    class="input"
-                    placeholder="例如 电影、家庭录像"
-                    required
-                  >
-                </div>
-
-                <div class="field">
-                  <label for="root-create-path" class="field-label">共享内相对路径</label>
-                  <div class="input-with-btn">
-                    <input
-                      id="root-create-path"
-                      name="path"
-                      type="text"
-                      class="input input-mono"
-                      placeholder="留空表示整个共享根目录"
-                      autocapitalize="off"
-                      autocomplete="off"
-                      spellcheck="false"
-                      aria-describedby="root-create-path-hint"
-                    >
-                    <button id="open-nas-picker-btn" type="button" class="btn btn-secondary">浏览 NAS…</button>
+              <div class="admin-two-col">
+                <div class="panel panel-form">
+                  <div class="panel-header">
+                    <div>
+                      <h3 class="panel-title">新增授权目录</h3>
+                      <p class="panel-desc">添加后可直接在片库打开，或立即在下方为普通账号分配。</p>
+                    </div>
                   </div>
-                  <p id="root-create-path-hint" class="field-hint">
-                    只有<strong>完全留空</strong>才表示整个共享；路径中的空格等字符会原样保存。创建后路径不可修改。
-                  </p>
+
+                  <div id="root-create-alert" class="alert" role="alert" hidden></div>
+
+                  <form id="root-create-form" class="form-stack" novalidate>
+                    <div class="field">
+                      <label for="root-create-label" class="field-label">显示名称<span class="req" aria-hidden="true">*</span></label>
+                      <input
+                        id="root-create-label"
+                        name="label"
+                        type="text"
+                        class="input"
+                        placeholder="例如 电影、家庭录像"
+                        required
+                      >
+                    </div>
+
+                    <div class="field">
+                      <label for="root-create-path" class="field-label">共享内相对路径</label>
+                      <div class="input-with-btn">
+                        <input
+                          id="root-create-path"
+                          name="path"
+                          type="text"
+                          class="input input-mono"
+                          placeholder="留空表示整个共享根目录"
+                          autocapitalize="off"
+                          autocomplete="off"
+                          spellcheck="false"
+                          aria-describedby="root-create-path-hint"
+                        >
+                        <button id="open-nas-picker-btn" type="button" class="btn btn-secondary">浏览 NAS…</button>
+                      </div>
+                      <p id="root-create-path-hint" class="field-hint">
+                        只有<strong>完全留空</strong>才表示整个共享；路径中的空格等字符会原样保存。创建后路径不可修改。
+                      </p>
+                    </div>
+
+                    <div class="form-actions">
+                      <button id="root-create-submit-btn" type="submit" class="btn btn-primary">添加授权目录</button>
+                    </div>
+                  </form>
                 </div>
 
-                <div class="form-actions">
-                  <button id="root-create-submit-btn" type="submit" class="btn btn-primary">添加授权目录</button>
-                </div>
-              </form>
-            </div>
+                <div class="panel">
+                  <div class="panel-header panel-header-compact">
+                    <div>
+                      <h3 class="panel-title">已有授权目录</h3>
+                      <p class="panel-desc">可修改显示名称；删除会同时收回所有账号对该目录的授权。</p>
+                    </div>
+                    <button id="admin-roots-refresh-btn" type="button" class="btn btn-ghost btn-sm">刷新</button>
+                  </div>
 
-            <div class="panel">
-              <div class="panel-header panel-header-compact">
-                <div>
-                  <h2 class="panel-title">已有授权目录</h2>
-                  <p class="panel-desc">可修改显示名称；删除会同时收回所有账号对该目录的授权。</p>
+                  <div id="admin-roots-alert" class="alert alert-error" role="alert" hidden></div>
+                  <div id="admin-roots-loading" class="inline-loading" role="status" aria-live="polite" hidden>
+                    <span class="spinner spinner-sm" aria-hidden="true"></span>
+                    <span>正在加载授权目录…</span>
+                  </div>
+                  <div id="admin-roots-empty" class="empty-state" hidden></div>
+                  <div id="admin-roots-list" class="record-list"></div>
                 </div>
-                <button id="admin-roots-refresh-btn" type="button" class="btn btn-ghost btn-sm">刷新</button>
+              </div>
+            </section>
+
+            <!-- 区域 2：账号与授权 -->
+            <section id="admin-section-users" class="perm-section" aria-labelledby="admin-section-users-heading">
+              <div class="perm-section-head">
+                <h2 id="admin-section-users-heading" class="perm-section-title" tabindex="-1">账号与授权</h2>
+                <p class="perm-section-desc">管理登录账号并为普通账号分配目录；管理员默认可访问全部已建目录，无需单独授权。</p>
               </div>
 
-              <div id="admin-roots-alert" class="alert alert-error" role="alert" hidden></div>
-              <div id="admin-roots-loading" class="inline-loading" role="status" aria-live="polite" hidden>
-                <span class="spinner spinner-sm" aria-hidden="true"></span>
-                <span>正在加载授权目录…</span>
-              </div>
-              <div id="admin-roots-empty" class="empty-state" hidden></div>
-              <div id="admin-roots-list" class="record-list"></div>
-            </div>
-          </div>
-        </section>
+              <div class="admin-two-col">
+                <div class="panel panel-form">
+                  <div class="panel-header">
+                    <div>
+                      <h3 class="panel-title">新建账号</h3>
+                      <p class="panel-desc">普通账号创建后在右侧点击「分配目录」；管理员无需授权即可访问全部目录。</p>
+                    </div>
+                  </div>
 
-        <!-- 分区 3：账号与授权管理 -->
-        <section
-          id="admin-panel-users"
-          class="admin-panel"
-          role="tabpanel"
-          aria-labelledby="admin-tab-users"
-          hidden
-        >
-          <div class="admin-two-col">
-            <div class="panel panel-form">
-              <div class="panel-header">
-                <div>
-                  <h2 class="panel-title">新建账号</h2>
-                  <p class="panel-desc">普通账号需要在「账号列表」中分配目录；管理员可访问全部已建目录。</p>
+                  <div id="user-create-alert" class="alert" role="alert" hidden></div>
+
+                  <form id="user-create-form" class="form-stack" novalidate>
+                    <div class="field">
+                      <label for="user-create-username" class="field-label">用户名<span class="req" aria-hidden="true">*</span></label>
+                      <input
+                        id="user-create-username"
+                        name="username"
+                        type="text"
+                        class="input"
+                        autocomplete="off"
+                        autocapitalize="off"
+                        spellcheck="false"
+                        placeholder="登录时使用的名称"
+                        required
+                      >
+                    </div>
+
+                    <div class="field">
+                      <label for="user-create-password" class="field-label">初始密码<span class="req" aria-hidden="true">*</span></label>
+                      <input
+                        id="user-create-password"
+                        name="password"
+                        type="password"
+                        class="input"
+                        autocomplete="new-password"
+                        placeholder="请输入初始密码"
+                        required
+                      >
+                    </div>
+
+                    <div class="field">
+                      <label for="user-create-role" class="field-label">账号角色</label>
+                      <select id="user-create-role" name="role" class="input">
+                        <option value="viewer">普通用户（仅浏览与播放已分配目录）</option>
+                        <option value="admin">管理员（默认访问全部目录并管理后台）</option>
+                      </select>
+                    </div>
+
+                    <div class="form-actions">
+                      <button id="user-create-submit-btn" type="submit" class="btn btn-primary">创建账号</button>
+                    </div>
+                  </form>
+                </div>
+
+                <div class="panel">
+                  <div class="panel-header panel-header-compact">
+                    <div>
+                      <h3 class="panel-title">账号列表</h3>
+                      <p class="panel-desc">为普通账号分配目录，或编辑改密、启停；删除账号不可恢复。</p>
+                    </div>
+                    <button id="admin-users-refresh-btn" type="button" class="btn btn-ghost btn-sm">刷新</button>
+                  </div>
+
+                  <div id="admin-users-alert" class="alert alert-error" role="alert" hidden></div>
+                  <div id="admin-users-loading" class="inline-loading" role="status" aria-live="polite" hidden>
+                    <span class="spinner spinner-sm" aria-hidden="true"></span>
+                    <span>正在加载账号列表…</span>
+                  </div>
+                  <div id="admin-users-empty" class="empty-state" hidden></div>
+                  <div id="admin-users-list" class="record-list"></div>
                 </div>
               </div>
-
-              <div id="user-create-alert" class="alert" role="alert" hidden></div>
-
-              <form id="user-create-form" class="form-stack" novalidate>
-                <div class="field">
-                  <label for="user-create-username" class="field-label">用户名<span class="req" aria-hidden="true">*</span></label>
-                  <input
-                    id="user-create-username"
-                    name="username"
-                    type="text"
-                    class="input"
-                    autocomplete="off"
-                    autocapitalize="off"
-                    spellcheck="false"
-                    placeholder="登录时使用的名称"
-                    required
-                  >
-                </div>
-
-                <div class="field">
-                  <label for="user-create-password" class="field-label">初始密码<span class="req" aria-hidden="true">*</span></label>
-                  <input
-                    id="user-create-password"
-                    name="password"
-                    type="password"
-                    class="input"
-                    autocomplete="new-password"
-                    placeholder="请输入初始密码"
-                    required
-                  >
-                </div>
-
-                <div class="field">
-                  <label for="user-create-role" class="field-label">账号角色</label>
-                  <select id="user-create-role" name="role" class="input">
-                    <option value="viewer">普通用户（仅浏览与播放已授权目录）</option>
-                    <option value="admin">管理员（含播放与管理台权限）</option>
-                  </select>
-                </div>
-
-                <div class="form-actions">
-                  <button id="user-create-submit-btn" type="submit" class="btn btn-primary">创建账号</button>
-                </div>
-              </form>
-            </div>
-
-            <div class="panel">
-              <div class="panel-header panel-header-compact">
-                <div>
-                  <h2 class="panel-title">账号列表</h2>
-                  <p class="panel-desc">目录授权、编辑与改密、启用状态；删除账号不可恢复。</p>
-                </div>
-                <button id="admin-users-refresh-btn" type="button" class="btn btn-ghost btn-sm">刷新</button>
-              </div>
-
-              <div id="admin-users-alert" class="alert alert-error" role="alert" hidden></div>
-              <div id="admin-users-loading" class="inline-loading" role="status" aria-live="polite" hidden>
-                <span class="spinner spinner-sm" aria-hidden="true"></span>
-                <span>正在加载账号列表…</span>
-              </div>
-              <div id="admin-users-empty" class="empty-state" hidden></div>
-              <div id="admin-users-list" class="record-list"></div>
-            </div>
+            </section>
           </div>
         </section>
       </section>

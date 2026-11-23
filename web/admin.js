@@ -22,8 +22,20 @@
     const tabButtons = Array.prototype.slice.call(document.querySelectorAll('[data-admin-tab]'));
     const tabPanels = {
       nas: document.getElementById('admin-panel-nas'),
-      roots: document.getElementById('admin-panel-roots'),
-      users: document.getElementById('admin-panel-users'),
+      permissions: document.getElementById('admin-panel-permissions'),
+    };
+    const permJumpButtons = Array.prototype.slice.call(document.querySelectorAll('[data-perm-jump]'));
+    const permJumpRootsCount = document.getElementById('perm-jump-roots-count');
+    const permJumpUsersCount = document.getElementById('perm-jump-users-count');
+    const permSections = {
+      roots: {
+        section: document.getElementById('admin-section-roots'),
+        heading: document.getElementById('admin-section-roots-heading'),
+      },
+      users: {
+        section: document.getElementById('admin-section-users'),
+        heading: document.getElementById('admin-section-users-heading'),
+      },
     };
 
     // NAS DOM
@@ -101,32 +113,74 @@
       return pad(now.getHours()) + ':' + pad(now.getMinutes()) + ':' + pad(now.getSeconds());
     }
 
-    // ---------- 子标签切换 ----------
-    function switchTab(tabName) {
-      if (!tabPanels[tabName]) {
+    // ---------- 顶层标签切换与权限页同页定位 ----------
+    function prefersReducedMotion() {
+      return Boolean(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
+    }
+
+    function updateJumpCount(el, count, visible) {
+      if (!el) {
         return;
       }
-      state.activeTab = tabName;
+      if (!visible) {
+        el.textContent = '';
+        el.hidden = true;
+        return;
+      }
+      el.textContent = String(count);
+      el.hidden = false;
+    }
+
+    function scrollToPermissionSection(sectionName, focusTarget) {
+      const entry = permSections[sectionName];
+      if (!entry || !entry.section) {
+        return;
+      }
+      entry.section.scrollIntoView({
+        behavior: prefersReducedMotion() ? 'auto' : 'smooth',
+        block: 'start',
+      });
+      const target = focusTarget || entry.heading;
+      if (target && typeof target.focus === 'function') {
+        target.focus({ preventScroll: true });
+      }
+    }
+
+    function syncTabUi(tabName) {
       for (let i = 0; i < tabButtons.length; i += 1) {
         const btn = tabButtons[i];
         const isSelected = btn.getAttribute('data-admin-tab') === tabName;
         btn.classList.toggle('is-active', isSelected);
         btn.setAttribute('aria-selected', isSelected ? 'true' : 'false');
+        btn.setAttribute('tabindex', isSelected ? '0' : '-1');
       }
       const panelKeys = Object.keys(tabPanels);
       for (let i = 0; i < panelKeys.length; i += 1) {
         const key = panelKeys[i];
         tabPanels[key].hidden = key !== tabName;
       }
+    }
+
+    function switchTab(tabName, options) {
+      if (!tabPanels[tabName]) {
+        return;
+      }
+      const opts = options || {};
+      const changed = state.activeTab !== tabName;
+      const wasHidden = tabPanels[tabName].hidden;
+      state.activeTab = tabName;
+      syncTabUi(tabName);
 
       if (tabName !== 'nas' && nasDiscovering) {
         cancelShareSearch();
       }
+      if (!changed && !wasHidden && !opts.forceLoad) {
+        return;
+      }
       if (tabName === 'nas') {
         loadNasConfig();
-      } else if (tabName === 'roots') {
+      } else if (tabName === 'permissions') {
         loadRoots();
-      } else if (tabName === 'users') {
         loadUsers();
       }
     }
@@ -137,16 +191,30 @@
         switchTab(targetTab);
       });
       tabButtons[i].addEventListener('keydown', function (event) {
-        if (event.key !== 'ArrowRight' && event.key !== 'ArrowLeft') {
+        const idx = tabButtons.indexOf(event.currentTarget);
+        let nextIdx = -1;
+        if (event.key === 'ArrowRight') {
+          nextIdx = (idx + 1) % tabButtons.length;
+        } else if (event.key === 'ArrowLeft') {
+          nextIdx = (idx - 1 + tabButtons.length) % tabButtons.length;
+        } else if (event.key === 'Home') {
+          nextIdx = 0;
+        } else if (event.key === 'End') {
+          nextIdx = tabButtons.length - 1;
+        } else {
           return;
         }
         event.preventDefault();
-        const idx = tabButtons.indexOf(event.currentTarget);
-        const dir = event.key === 'ArrowRight' ? 1 : -1;
-        const nextIdx = (idx + dir + tabButtons.length) % tabButtons.length;
         const nextBtn = tabButtons[nextIdx];
         nextBtn.focus();
         switchTab(nextBtn.getAttribute('data-admin-tab'));
+      });
+    }
+
+    for (let i = 0; i < permJumpButtons.length; i += 1) {
+      permJumpButtons[i].addEventListener('click', function (event) {
+        const targetSection = event.currentTarget.getAttribute('data-perm-jump');
+        scrollToPermissionSection(targetSection);
       });
     }
 
@@ -438,8 +506,8 @@
         const next = U.el('button', {
           className: 'btn btn-secondary btn-sm', text: '选择授权目录…', props: { type: 'button' },
           on: { click: function () {
-            switchTab('roots');
-            openNasPickerBtn.focus();
+            switchTab('permissions');
+            scrollToPermissionSection('roots', openNasPickerBtn);
             openRootPicker();
           } },
         });
@@ -623,8 +691,8 @@
                 click: function () {
                   const picked = currentPath;
                   U.closeModal();
-                  switchTab('roots');
-                  applyPickedRootPath(picked);
+                  switchTab('permissions');
+                  applyPickedRootPath(picked, { scroll: true });
                 },
               },
             });
@@ -777,7 +845,7 @@
       browsePath(currentPath);
     }
 
-    function applyPickedRootPath(pickedPath) {
+    function applyPickedRootPath(pickedPath, options) {
       const exactPath = typeof pickedPath === 'string' ? pickedPath : '';
       rootCreatePath.value = exactPath;
       if (!rootCreateLabel.value.trim()) {
@@ -791,12 +859,17 @@
           }
         }
       }
-      rootCreateLabel.focus();
+      if (options && options.scroll) {
+        scrollToPermissionSection('roots', rootCreateLabel);
+      } else {
+        rootCreateLabel.focus();
+      }
     }
 
     // ---------- 授权目录（根）管理 ----------
     function renderRootsList() {
       adminRootsList.replaceChildren();
+      updateJumpCount(permJumpRootsCount, state.roots.length, true);
       if (state.roots.length === 0) {
         adminRootsEmpty.replaceChildren(
           U.el('p', { className: 'empty-state-title', text: '暂无授权目录' }),
@@ -1071,7 +1144,7 @@
           className: 'btn btn-secondary btn-sm', text: '在片库打开', props: { type: 'button' },
           on: { click: function () { callbacks.onOpenLibraryRoot(res.root.id); } },
         });
-        U.setAlert(rootCreateAlert, '已添加“' + label + '”。管理员可直接浏览；普通账号需要在「账号与权限」分配目录。', 'success', open);
+        U.setAlert(rootCreateAlert, '已添加“' + label + '”。管理员可直接浏览，无需授权；普通账号可在下方「账号与授权」中分配目录。', 'success', open);
         if (document.activeElement === document.body && open.getClientRects().length) open.focus();
         U.showToast('授权目录已添加', 'success');
         loadRoots();
@@ -1087,6 +1160,7 @@
     // ---------- 账号与多选目录授权管理 ----------
     function renderUsersList() {
       adminUsersList.replaceChildren();
+      updateJumpCount(permJumpUsersCount, state.users.length, true);
       if (state.users.length === 0) {
         adminUsersEmpty.replaceChildren(
           U.el('p', { className: 'empty-state-title', text: '暂无账号记录' })
@@ -1101,11 +1175,12 @@
       for (let i = 0; i < state.users.length; i += 1) {
         const user = state.users[i];
         const isSelf = Boolean(currentUser && String(currentUser.id) === String(user.id));
+        const isAdmin = user.role === 'admin';
 
         const titleRow = U.el('div', { className: 'record-title-row' }, [
           U.el('span', { className: 'record-title', text: user.username }),
           U.el('span', {
-            className: user.role === 'admin' ? 'badge badge-primary' : 'badge',
+            className: isAdmin ? 'badge badge-primary' : 'badge',
             text: U.formatRoleLabel(user.role),
           }),
           U.el('span', {
@@ -1115,16 +1190,31 @@
           isSelf ? U.el('span', { className: 'badge badge-warning', text: '当前账号' }) : null,
         ]);
 
-        const grantsBtn = U.el('button', {
-          className: 'btn btn-primary btn-sm',
-          text: '目录授权',
-          props: { type: 'button' },
-          on: {
-            click: function () {
-              openGrantsModal(user);
-            },
-          },
-        });
+        const infoNodes = [titleRow];
+        if (isAdmin) {
+          infoNodes.push(
+            U.el('div', {
+              className: 'record-sub record-sub-plain',
+              text: '默认可访问全部已建目录，无需单独分配',
+            })
+          );
+        }
+
+        const actionNodes = [];
+        if (!isAdmin) {
+          actionNodes.push(
+            U.el('button', {
+              className: 'btn btn-primary btn-sm',
+              text: '分配目录',
+              props: { type: 'button' },
+              on: {
+                click: function () {
+                  openGrantsModal(user);
+                },
+              },
+            })
+          );
+        }
 
         const editBtn = U.el('button', {
           className: 'btn btn-secondary btn-sm',
@@ -1159,10 +1249,12 @@
           },
         });
 
+        actionNodes.push(editBtn, toggleBtn, deleteBtn);
+
         adminUsersList.appendChild(
           U.el('div', { className: 'record-card' }, [
-            U.el('div', { className: 'record-info' }, [titleRow]),
-            U.el('div', { className: 'record-actions' }, [grantsBtn, editBtn, toggleBtn, deleteBtn]),
+            U.el('div', { className: 'record-info' }, infoNodes),
+            U.el('div', { className: 'record-actions' }, actionNodes),
           ])
         );
       }
@@ -1428,6 +1520,9 @@
     }
 
     function openGrantsModal(user) {
+      if (!user || user.role === 'admin') {
+        return;
+      }
       const modalAlert = U.el('div', { className: 'alert alert-error', attrs: { role: 'alert' }, props: { hidden: true } });
       const loadingBox = U.el(
         'div',
@@ -1482,7 +1577,18 @@
           toolbar.hidden = true;
           emptyBox.replaceChildren(
             U.el('p', { className: 'empty-state-title', text: '尚未创建任何授权目录' }),
-            U.el('p', { className: 'empty-state-desc', text: '请先切换到「授权目录」添加至少一个目录，再回到此处为账号分配权限。' })
+            U.el('p', { className: 'empty-state-desc', text: '请先在本页上方的「授权目录」区域添加至少一个目录，再为该账号分配。' }),
+            U.el('button', {
+              className: 'btn btn-primary btn-sm',
+              text: '前往新增授权目录',
+              props: { type: 'button' },
+              on: {
+                click: function () {
+                  U.closeModal();
+                  scrollToPermissionSection('roots', rootCreateLabel);
+                },
+              },
+            })
           );
           emptyBox.hidden = false;
           saveBtn.disabled = false;
@@ -1596,6 +1702,7 @@
           }
           allRoots = Array.isArray(results[0] && results[0].roots) ? results[0].roots : [];
           state.roots = allRoots;
+          renderRootsList();
           const grantedIds = Array.isArray(results[1] && results[1].rootIds) ? results[1].rootIds : [];
 
           selectedKeys.clear();
@@ -1638,13 +1745,11 @@
       }
 
       U.openModal({
-        title: '目录授权：' + user.username,
+        title: '分配目录：' + user.username,
         content: [
           U.el('p', {
             className: 'panel-desc',
-            text: user.role === 'admin'
-              ? '管理员可以访问所有已建目录。此处勾选的是改为普通账号后的可见目录，不会限制当前管理员权限。'
-              : '勾选该账号可浏览与播放的根目录，保存后将整体替换原有授权。',
+            text: '勾选该普通账号可浏览与播放的目录，保存后将整体替换原有授权。',
           }),
           modalAlert,
           loadingBox,
@@ -1702,10 +1807,30 @@
         userCreateRole.value = 'viewer';
 
         const created = res && res.user ? res.user : null;
+        const createdName = created ? created.username : username;
+        const grantAction =
+          role !== 'admin' && created && created.id
+            ? U.el('button', {
+                className: 'btn btn-secondary btn-sm',
+                text: '立即分配目录',
+                props: { type: 'button' },
+                on: {
+                  click: function () {
+                    openGrantsModal(created);
+                  },
+                },
+              })
+            : null;
         U.setAlert(
           userCreateAlert,
-          '账号“' + (created ? created.username : username) + '”已创建。' + (role === 'admin' ? '管理员可直接访问全部已建目录。' : '请在账号列表中点击「目录授权」分配访问目录。'),
-          'success'
+          '账号“' +
+            createdName +
+            '”已创建。' +
+            (role === 'admin'
+              ? '管理员默认可访问全部已建目录，无需单独分配。'
+              : '可在右侧「账号列表」中点击「分配目录」为其授权。'),
+          'success',
+          grantAction
         );
         U.showToast('账号创建成功', 'success');
         loadUsers();
@@ -1722,12 +1847,13 @@
     });
 
     function activate() {
-      switchTab(state.activeTab || 'nas');
+      switchTab(state.activeTab || 'nas', { forceLoad: true });
     }
 
     function reset() {
       gate.abortAll();
       state.activeTab = 'nas';
+      syncTabUi('nas');
       state.loadedNas = null;
       state.nasFetched = false;
       state.nasSaving = false;
@@ -1736,6 +1862,8 @@
       setRootCreating(false);
       state.roots = [];
       state.users = [];
+      updateJumpCount(permJumpRootsCount, 0, false);
+      updateJumpCount(permJumpUsersCount, 0, false);
       nasHostInput.value = '';
       nasPortInput.value = '445';
       nasManualInput.value = '';

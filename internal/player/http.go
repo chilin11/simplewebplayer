@@ -189,8 +189,8 @@ func match(path string) route {
 				case "browse":
 					rt.key = "nas/browse"
 					rt.methods = "GET"
-				case "test":
-					rt.key = "nas/test"
+				case "test", "shares":
+					rt.key = "nas/" + p[3]
 					rt.methods = "POST"
 				}
 			}
@@ -303,6 +303,8 @@ func (c *call) run() error {
 			return c.castControl(tx)
 		case "users", "users/id", "grants":
 			return c.accounts(tx)
+		case "nas/shares":
+			return c.previewShares(tx)
 		case "roots", "roots/id", "nas":
 			return c.settings(tx)
 		default:

@@ -48,29 +48,54 @@ func (a *App) credentials(tx *sql.Tx) (media.Settings, error) {
 	if n == nil {
 		return media.Settings{}, &apiError{409, "nas_not_configured", "请先配置 NAS"}
 	}
-	pw, e := a.box.Open(nil, nil, n.secret, nasAAD)
+	n.settings.Password, e = a.openNASPassword(n.secret)
 	if e != nil {
-		return media.Settings{}, errors.New("stored credential cannot be opened")
+		return media.Settings{}, e
 	}
-	n.settings.Password = string(pw)
 	return n.settings, nil
 }
-func (c *call) saveNAS(tx *sql.Tx, old *nasRow, obj object) error {
+
+func (a *App) openNASPassword(secret []byte) (string, error) {
+	pw, e := a.box.Open(nil, nil, secret, nasAAD)
+	if e != nil {
+		return "", errors.New("stored credential cannot be opened")
+	}
+	return string(pw), nil
+}
+
+func nasServerFields(obj object) (media.Settings, error) {
 	var s media.Settings
 	var e error
 	if s.Host, e = get[string](obj, "host"); e != nil {
-		return e
+		return s, e
 	}
 	if s.Port, e = optional(obj, "port", 445); e != nil {
+		return s, e
+	}
+	if s.Username, e = get[string](obj, "username"); e != nil {
+		return s, e
+	}
+	s.Domain, e = optional(obj, "domain", "")
+	return s, e
+}
+
+func nasPassword(obj object) (string, error) {
+	pw, e := get[string](obj, "password")
+	if e != nil {
+		return "", e
+	}
+	if pw == "" || utf8.RuneCountInString(pw) > 1024 || strings.ContainsRune(pw, 0) {
+		return "", invalid("NAS 密码无效")
+	}
+	return pw, nil
+}
+
+func (c *call) saveNAS(tx *sql.Tx, old *nasRow, obj object) error {
+	s, e := nasServerFields(obj)
+	if e != nil {
 		return e
 	}
 	if s.Share, e = get[string](obj, "share"); e != nil {
-		return e
-	}
-	if s.Username, e = get[string](obj, "username"); e != nil {
-		return e
-	}
-	if s.Domain, e = optional(obj, "domain", ""); e != nil {
 		return e
 	}
 	if e = media.ValidateSettings(s); e != nil {
@@ -87,12 +112,9 @@ func (c *call) saveNAS(tx *sql.Tx, old *nasRow, obj object) error {
 	}
 	var secret []byte
 	if _, ok := obj["password"]; ok {
-		pw, e := get[string](obj, "password")
+		pw, e := nasPassword(obj)
 		if e != nil {
 			return e
-		}
-		if pw == "" || utf8.RuneCountInString(pw) > 1024 || strings.ContainsRune(pw, 0) {
-			return invalid("NAS 密码无效")
 		}
 		secret = c.app.box.Seal(nil, nil, []byte(pw), nasAAD)
 	} else if old != nil && old.settings == s {

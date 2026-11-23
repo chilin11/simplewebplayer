@@ -27,13 +27,14 @@ type Options struct {
 	SecureCookies bool
 }
 type App struct {
-	db        *sql.DB
-	box       cipher.AEAD
-	opts      Options
-	hashSlots chan struct{}
-	dummy     []byte
-	casts     castRegistry
-	castLAN   func(*http.Request) (casting.LAN, bool)
+	db         *sql.DB
+	box        cipher.AEAD
+	opts       Options
+	hashSlots  chan struct{}
+	shareSlots chan struct{}
+	dummy      []byte
+	casts      castRegistry
+	castLAN    func(*http.Request) (casting.LAN, bool)
 }
 
 const schema = `
@@ -169,7 +170,7 @@ func Open(dataDir string, opts Options) (*App, error) {
 		return nil, err
 	}
 	db.SetMaxOpenConns(1)
-	app := &App{db: db, box: box, opts: opts, hashSlots: make(chan struct{}, 2), casts: newCastRegistry(), castLAN: casting.FromRequest}
+	app := &App{db: db, box: box, opts: opts, hashSlots: make(chan struct{}, 2), shareSlots: make(chan struct{}, 2), casts: newCastRegistry(), castLAN: casting.FromRequest}
 	if _, err = db.Exec("PRAGMA journal_mode=WAL"); err == nil {
 		err = app.transaction(context.Background(), func(tx *sql.Tx) error { _, e := tx.Exec(schema); return e })
 	}

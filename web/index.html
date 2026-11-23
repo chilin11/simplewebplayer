@@ -6,6 +6,7 @@
   <meta name="color-scheme" content="dark">
   <meta name="theme-color" content="#14110e">
   <title>影音播放台 · 家庭片库</title>
+  <link rel="icon" type="image/svg+xml" href="/assets/favicon.svg">
   <link rel="stylesheet" href="/assets/styles.css">
   <script defer src="/assets/utils.js"></script>
   <script defer src="/assets/api.js"></script>
@@ -377,8 +378,8 @@
           <div class="panel">
             <div class="panel-header">
               <div>
-                <h2 class="panel-title">SMB 共享连接</h2>
-                <p class="panel-desc">填写家中 NAS 的地址、共享名与访问凭据。保存后可测试连接并预览共享内的目录。</p>
+                <h2 class="panel-title">NAS 连接</h2>
+                <p class="panel-desc">填写 NAS 地址和账号，点击「连接 NAS」查看可读取的共享文件夹。</p>
               </div>
               <div class="status-group">
                 <span id="nas-status-badge" class="badge">加载中…</span>
@@ -405,12 +406,6 @@
                   </div>
 
                   <div class="field">
-                    <label for="nas-share" class="field-label">共享名称<span class="req" aria-hidden="true">*</span></label>
-                    <input id="nas-share" name="share" type="text" class="input" placeholder="例如 media 或 videos" autocapitalize="off" spellcheck="false" required aria-describedby="nas-share-hint">
-                    <p id="nas-share-hint" class="field-hint">只填共享名本身，不含主机与斜杠。</p>
-                  </div>
-
-                  <div class="field">
                     <label for="nas-domain" class="field-label">域 / 工作组<span class="field-optional">可选</span></label>
                     <input id="nas-domain" name="domain" type="text" class="input" placeholder="如 WORKGROUP，可留空" autocapitalize="off" spellcheck="false">
                   </div>
@@ -418,15 +413,15 @@
               </fieldset>
 
               <fieldset class="form-section">
-                <legend class="form-section-title">访问凭据</legend>
+                <legend class="form-section-title">NAS 账号</legend>
                 <div class="form-grid">
                   <div class="field">
-                    <label for="nas-username" class="field-label">SMB 用户名<span class="req" aria-hidden="true">*</span></label>
-                    <input id="nas-username" name="username" type="text" required class="input" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="访问共享使用的账号">
+                    <label for="nas-username" class="field-label">NAS 用户名<span class="req" aria-hidden="true">*</span></label>
+                    <input id="nas-username" name="username" type="text" required class="input" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="例如 DSM 本地用户名">
                   </div>
 
                   <div class="field">
-                    <label for="nas-password" class="field-label">SMB 密码</label>
+                    <label for="nas-password" class="field-label">NAS 密码</label>
                     <input
                       id="nas-password"
                       name="password"
@@ -436,13 +431,32 @@
                       placeholder="请输入密码"
                       aria-describedby="nas-password-hint"
                     >
-                    <p id="nas-password-hint" class="field-hint">首次配置须输入只读 SMB 账号的密码。保存后不会回显。</p>
+                    <p id="nas-password-hint" class="field-hint">使用有共享读取权限的 NAS 本地账号。保存后不回显密码。</p>
                   </div>
                 </div>
               </fieldset>
 
+              <fieldset class="form-section">
+                <legend class="form-section-title">共享文件夹</legend>
+                <div class="form-actions">
+                  <button id="nas-connect-btn" type="button" class="btn btn-primary">连接 NAS</button>
+                  <button id="nas-share-mode" type="button" class="btn btn-ghost" aria-controls="nas-share-list nas-share-manual-field">手动填写</button>
+                </div>
+                <div id="nas-share-status" class="alert" role="status" aria-live="polite" hidden></div>
+                <div id="nas-share-list" class="field">
+                  <label for="nas-share" class="field-label">选择共享文件夹</label>
+                  <select id="nas-share" name="share" class="input" aria-describedby="nas-share-hint" disabled>
+                    <option value="">请先连接 NAS</option>
+                  </select>
+                </div>
+                <div id="nas-share-manual-field" class="field" hidden>
+                  <label for="nas-share-manual" class="field-label">共享文件夹名称</label>
+                  <input id="nas-share-manual" type="text" class="input" placeholder="例如 video" autocapitalize="off" spellcheck="false" aria-describedby="nas-share-hint">
+                </div>
+                <p id="nas-share-hint" class="field-hint">群晖 DSM「控制面板 → 共享文件夹」中的顶层名称，例如 <code>video</code>，不是 <code>/volume1/video</code>。子目录在「授权目录」内选择。</p>
+              </fieldset>
               <div class="form-actions form-actions-bar">
-                <button id="nas-save-btn" type="submit" class="btn btn-primary">保存配置</button>
+                <button id="nas-save-btn" type="submit" class="btn btn-secondary">保存配置</button>
                 <button id="nas-test-btn" type="button" class="btn btn-secondary">测试已保存连接</button>
                 <button id="nas-preview-browse-btn" type="button" class="btn btn-ghost">浏览共享目录</button>
                 <span class="form-actions-note">测试与浏览均使用<strong>已保存</strong>的配置。</span>

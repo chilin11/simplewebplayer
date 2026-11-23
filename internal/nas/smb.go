@@ -2,6 +2,7 @@ package nas
 
 import (
 	"context"
+	"errors"
 	"net"
 	"net/http"
 	"os"
@@ -19,12 +20,16 @@ const (
 	smbTimeout   = 8 * time.Second
 )
 
-type smbVolume struct {
+type smbTransport struct {
 	ctx        context.Context
 	cancel     context.CancelFunc
 	stopSocket func() bool
 	socket     net.Conn
-	share      *smb2.Share
+}
+
+type smbVolume struct {
+	*smbTransport
+	share *smb2.Share
 }
 
 func uncHost(host string) string {
@@ -38,62 +43,77 @@ func uncHost(host string) string {
 	return host
 }
 
+func invalidSMBSettings() *media.Error {
+	return problem(http.StatusBadRequest, "invalid_settings", "NAS 连接设置无效")
+}
+
 func dialSMB(parent context.Context, cfg media.Settings) (volume, error) {
-	invalid := problem(http.StatusBadRequest, "invalid_settings", "NAS 连接设置无效")
-	if err := media.ValidateSettings(cfg); err != nil || strings.EqualFold(cfg.Share, "IPC$") {
-		return nil, invalid
+	if err := media.ValidateSettings(cfg); err != nil {
+		return nil, invalidSMBSettings()
 	}
+	setup, stopSetup := context.WithTimeout(parent, setupTimeout)
+	defer stopSetup()
+	transport, session, err := dialSMBSession(parent, setup, cfg)
+	if err != nil {
+		return nil, err
+	}
+	stopAbort := context.AfterFunc(setup, transport.cancel)
+	defer stopAbort()
+	share, err := session.WithContext(setup).Mount(cfg.Share)
+	if err != nil {
+		transport.Close()
+		return nil, smbMountError(err)
+	}
+	if share.IsDFS() {
+		transport.Close()
+		return nil, unsafePath()
+	}
+	if setup.Err() != nil {
+		transport.Close()
+		return nil, nasUnreachable()
+	}
+	return &smbVolume{smbTransport: transport, share: share.WithContext(transport.ctx)}, nil
+}
+
+// dialSMBSession shares the signed NTLM setup between media access and discovery.
+// Only the caller's lifetime, not the handshake deadline, owns a ready session.
+func dialSMBSession(parent, setup context.Context, cfg media.Settings) (*smbTransport, *smb2.Session, error) {
 	domain, user := cfg.Domain, cfg.Username
 	if prefix, rest, ok := strings.Cut(user, `\`); ok {
 		if prefix == "" || strings.TrimSpace(rest) == "" || strings.ContainsAny(prefix, `/@:`) || strings.ContainsAny(rest, `\/`) {
-			return nil, invalid
+			return nil, nil, invalidSMBSettings()
 		}
 		domain, user = prefix, rest
 	}
 	addr := net.JoinHostPort(cfg.Host, strconv.Itoa(cfg.Port))
-	setup, stopSetup := context.WithTimeout(parent, setupTimeout)
-	defer stopSetup()
 	socket, err := (&net.Dialer{}).DialContext(setup, "tcp", addr)
 	if err != nil {
-		return nil, err
+		return nil, nil, nasUnreachable()
 	}
 	ctx, cancel := context.WithCancel(parent)
-	v := &smbVolume{ctx: ctx, cancel: cancel, socket: socket}
-	v.stopSocket = context.AfterFunc(ctx, func() { _ = socket.Close() })
+	t := &smbTransport{ctx: ctx, cancel: cancel, socket: socket}
+	t.stopSocket = context.AfterFunc(ctx, func() { _ = socket.Close() })
 	stopAbort := context.AfterFunc(setup, cancel)
 	defer stopAbort()
-	ready := false
-	defer func() {
-		if !ready {
-			v.Close()
-		}
-	}()
 
 	dialer := smb2.Dialer{
 		Negotiator: smb2.Negotiator{RequireMessageSigning: true},
 		Initiator:  &smb2.NTLMInitiator{User: user, Domain: domain, Password: cfg.Password},
 	}
-	session, err := dialer.DialConn(setup, socket, addr)
+	// DialConn uses this argument in UNC tree paths, including ListShares' IPC$.
+	session, err := dialer.DialConn(setup, socket, uncHost(cfg.Host))
 	if err != nil {
-		return nil, err
+		t.Close()
+		return nil, nil, smbSessionError(err)
 	}
-	// Mount's short form includes the TCP port in the UNC server name.
-	share, err := session.WithContext(setup).Mount(`\\` + uncHost(cfg.Host) + `\` + cfg.Share)
-	if err != nil {
-		return nil, err
+	if setup.Err() != nil {
+		t.Close()
+		return nil, nil, nasUnreachable()
 	}
-	if share.IsDFS() {
-		return nil, unsafePath()
-	}
-	if err := setup.Err(); err != nil {
-		return nil, err
-	}
-	v.share = share.WithContext(ctx)
-	ready = true
-	return v, nil
+	return t, session.WithContext(ctx), nil
 }
 
-func (v *smbVolume) Close() {
+func (v *smbTransport) Close() {
 	// The private transport owns the NAS session/tree and any unclosed handles.
 	// Close TCP directly even when a request is cancelled and SMB CLOSE fails.
 	v.stopSocket()
@@ -101,10 +121,15 @@ func (v *smbVolume) Close() {
 	_ = v.socket.Close()
 }
 
+func smbTransportFailed(err error) bool {
+	var transport *smb2.TransportError
+	return errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) || errors.As(err, &transport)
+}
+
 // Files capture their Share's context. Cancel the private session on any
 // operation timeout, which unblocks credit waits as well as network reads.
 // Reset the timer per operation so lengthy but progressing streams can finish.
-func smbOp[T any](v *smbVolume, op func() (T, error)) (T, error) {
+func smbOp[T any](v *smbTransport, op func() (T, error)) (T, error) {
 	var zero T
 	if err := v.ctx.Err(); err != nil {
 		return zero, err
@@ -122,33 +147,33 @@ func smbOp[T any](v *smbVolume, op func() (T, error)) (T, error) {
 }
 
 func (v *smbVolume) Open(path string) (file, error) {
-	f, err := smbOp(v, func() (*smb2.File, error) {
+	f, err := smbOp(v.smbTransport, func() (*smb2.File, error) {
 		return v.share.OpenNoFollow(strings.ReplaceAll(path, "/", `\`))
 	})
 	if err != nil {
 		return nil, err
 	}
-	return &smbFile{File: f, volume: v}, nil
+	return &smbFile{File: f, transport: v.smbTransport}, nil
 }
 
 type smbFile struct {
 	*smb2.File
-	volume *smbVolume
+	transport *smbTransport
 }
 
 func (f *smbFile) Stat() (os.FileInfo, error) {
-	return smbOp(f.volume, f.File.Stat)
+	return smbOp(f.transport, f.File.Stat)
 }
 
 func (f *smbFile) Read(p []byte) (int, error) {
-	return smbOp(f.volume, func() (int, error) { return f.File.Read(p) })
+	return smbOp(f.transport, func() (int, error) { return f.File.Read(p) })
 }
 
 func (f *smbFile) Readdir(n int) ([]os.FileInfo, error) {
-	return smbOp(f.volume, func() ([]os.FileInfo, error) { return f.File.Readdir(n) })
+	return smbOp(f.transport, func() ([]os.FileInfo, error) { return f.File.Readdir(n) })
 }
 
 func (f *smbFile) Close() error {
-	_, err := smbOp(f.volume, func() (struct{}, error) { return struct{}{}, f.File.Close() })
+	_, err := smbOp(f.transport, func() (struct{}, error) { return struct{}{}, f.File.Close() })
 	return err
 }

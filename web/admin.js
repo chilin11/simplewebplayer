@@ -30,7 +30,15 @@
     const nasForm = document.getElementById('nas-form');
     const nasHostInput = document.getElementById('nas-host');
     const nasPortInput = document.getElementById('nas-port');
-    const nasShareInput = document.getElementById('nas-share');
+    const nasShareSelect = document.getElementById('nas-share');
+    const nasShareList = document.getElementById('nas-share-list');
+    const nasManualField = document.getElementById('nas-share-manual-field');
+    const nasManualInput = document.getElementById('nas-share-manual');
+    const nasModeBtn = document.getElementById('nas-share-mode');
+    const nasConnectBtn = document.getElementById('nas-connect-btn');
+    const nasShareStatus = document.getElementById('nas-share-status');
+    let manualShareMode = false;
+    let nasDiscovering = false;
     const nasDomainInput = document.getElementById('nas-domain');
     const nasUsernameInput = document.getElementById('nas-username');
     const nasPasswordInput = document.getElementById('nas-password');
@@ -105,6 +113,9 @@
         tabPanels[key].hidden = key !== tabName;
       }
 
+      if (tabName !== 'nas' && nasDiscovering) {
+        cancelShareSearch();
+      }
       if (tabName === 'nas') {
         loadNasConfig();
       } else if (tabName === 'roots') {
@@ -134,13 +145,63 @@
     }
 
     // ---------- NAS SMB 配置与测试 ----------
-    function nasIdentityChanged() {
+    function activeShareControl() {
+      return manualShareMode ? nasManualInput : nasShareSelect;
+    }
+
+    function nasServerChanged() {
       const base = state.loadedNas || {};
       return nasHostInput.value.trim() !== (base.host || '') ||
         Number(nasPortInput.value) !== (base.port || 445) ||
-        nasShareInput.value.trim() !== (base.share || '') ||
         nasUsernameInput.value.trim() !== (base.username || '') ||
         nasDomainInput.value.trim() !== (base.domain || '');
+    }
+
+    function nasIdentityChanged() {
+      return nasServerChanged() || activeShareControl().value !== (state.loadedNas?.share || '');
+    }
+
+    function hasShareOption(value) {
+      if (!value) return false;
+      for (let i = 0; i < nasShareSelect.options.length; i += 1) {
+        if (nasShareSelect.options[i].value === value) return true;
+      }
+      return false;
+    }
+
+    function renderShareOptions(names, current) {
+      const prompt = names.length ? '请选择共享文件夹' : '请先连接 NAS';
+      nasShareSelect.replaceChildren(new Option(prompt, ''));
+      for (const name of names) nasShareSelect.add(new Option(name, name));
+      nasShareSelect.disabled = names.length === 0;
+      nasShareSelect.value = names.includes(current) ? current : (names.length === 1 ? names[0] : '');
+    }
+
+    function setShareMode(manual) {
+      manualShareMode = manual;
+      nasShareList.hidden = manual;
+      nasManualField.hidden = !manual;
+      nasModeBtn.textContent = manual ? '从列表选择' : '手动填写';
+    }
+
+    function cancelShareSearch() {
+      gate.abort('nasShares');
+      nasDiscovering = false;
+      nasConnectBtn.disabled = state.nasSaving;
+      nasConnectBtn.textContent = '连接 NAS';
+      U.clearAlert(nasShareStatus);
+    }
+
+    function resetShareSearch() {
+      cancelShareSearch();
+      const saved = !nasServerChanged() ? (state.loadedNas?.share || '') : '';
+      renderShareOptions(saved ? [saved] : [], saved);
+      nasManualInput.value = saved;
+    }
+
+    function isNasPasswordRequired() {
+      const nas = state.loadedNas;
+      return !nas || !nas.hasPassword || nasIdentityChanged();
     }
 
     function isNasFormDirty() {
@@ -155,22 +216,22 @@
       } else if (!nas) {
         nasStatusBadge.textContent = '未配置';
         nasStatusBadge.className = 'badge badge-warning';
-        nasPasswordInput.placeholder = '请输入只读 SMB 账号的密码';
+        nasPasswordInput.placeholder = '请输入 NAS 密码';
         nasPasswordHint.textContent = '首次配置必须输入密码，不支持匿名共享。';
       } else if (nas.hasPassword) {
         nasStatusBadge.textContent = '已配置（已保存密码）';
         nasStatusBadge.className = 'badge badge-success';
         const changed = nasIdentityChanged();
-        nasPasswordInput.placeholder = changed ? '重新输入 SMB 密码' : '留空则保留已保存密码';
-        nasPasswordHint.textContent = changed ? '连接信息已更改，原密码不会用于新的连接。' : '同一连接可留空保留原密码，或输入新密码。已保存的密码不会回显。';
+        nasPasswordInput.placeholder = changed ? '保存前请输入 NAS 密码' : '留空则保留已保存密码';
+        nasPasswordHint.textContent = changed ? '保存变更需要输入 NAS 密码；如果只换共享，连接查询时可以留空。' : '同一连接可留空保留原密码，或输入新密码。已保存的密码不会回显。';
       } else {
         nasStatusBadge.textContent = '已配置（未设置密码）';
         nasStatusBadge.className = 'badge badge-primary';
-        nasPasswordInput.placeholder = '请输入 SMB 密码';
+        nasPasswordInput.placeholder = '请输入 NAS 密码';
         nasPasswordHint.textContent = '当前未保存密码；输入密码并保存后不会再次显示。';
       }
 
-      nasPasswordInput.required = !nas || !nas.hasPassword || nasIdentityChanged();
+      nasPasswordInput.required = isNasPasswordRequired();
       nasDirtyBadge.hidden = !isNasFormDirty();
     }
 
@@ -179,10 +240,12 @@
       state.nasFetched = true;
       nasHostInput.value = nas && nas.host ? String(nas.host) : '';
       nasPortInput.value = nas && nas.port ? String(nas.port) : '445';
-      nasShareInput.value = nas && nas.share ? String(nas.share) : '';
+      nasManualInput.value = nas && nas.share ? String(nas.share) : '';
       nasUsernameInput.value = nas && nas.username ? String(nas.username) : '';
       nasDomainInput.value = nas && nas.domain ? String(nas.domain) : '';
       nasPasswordInput.value = '';
+      setShareMode(false);
+      resetShareSearch();
       updateNasIndicators();
     }
 
@@ -220,17 +283,99 @@
       }
     }
 
-    const nasWatchInputs = [
-      nasHostInput,
-      nasPortInput,
-      nasShareInput,
-      nasDomainInput,
-      nasUsernameInput,
-      nasPasswordInput,
-    ];
-    for (let i = 0; i < nasWatchInputs.length; i += 1) {
-      nasWatchInputs[i].addEventListener('input', updateNasIndicators);
+    const nasServerInputs = [nasHostInput, nasPortInput, nasDomainInput, nasUsernameInput, nasPasswordInput];
+    for (const input of nasServerInputs) {
+      input.addEventListener('input', function () {
+        if (input === nasPasswordInput) {
+          // Abort any in-flight discovery bound to the previous password without
+          // discarding already-fetched shares or the user's chosen share.
+          cancelShareSearch();
+        } else {
+          resetShareSearch();
+        }
+        updateNasIndicators();
+      });
     }
+    nasShareSelect.addEventListener('change', updateNasIndicators);
+    nasManualInput.addEventListener('input', updateNasIndicators);
+    nasModeBtn.addEventListener('click', function () {
+      if (!manualShareMode && nasDiscovering) {
+        cancelShareSearch();
+      }
+      if (!manualShareMode && nasShareSelect.value) {
+        nasManualInput.value = nasShareSelect.value;
+      } else if (manualShareMode && hasShareOption(nasManualInput.value)) {
+        nasShareSelect.value = nasManualInput.value;
+      }
+      setShareMode(!manualShareMode);
+      updateNasIndicators();
+      (manualShareMode ? nasManualInput : (nasShareSelect.disabled ? nasConnectBtn : nasShareSelect)).focus();
+    });
+
+    function nasServerPayload(alert) {
+      const host = nasHostInput.value.trim();
+      const port = Number(nasPortInput.value);
+      const username = nasUsernameInput.value.trim();
+      const domain = nasDomainInput.value.trim();
+      if (!host || !Number.isInteger(port) || port < 1 || port > 65535 || !username) {
+        const field = !host ? nasHostInput : (!(port >= 1 && port <= 65535 && Number.isInteger(port)) ? nasPortInput : nasUsernameInput);
+        U.setAlert(alert, !host ? '请填写 NAS 的局域网地址。' : (field === nasPortInput ? '端口必须为 1–65535（默认 445）。' : '请填写 NAS 用户名。'), 'error');
+        field.focus();
+        return null;
+      }
+      const payload = { host: host, port: port, username: username, domain: domain };
+      if (nasPasswordInput.value !== '') payload.password = nasPasswordInput.value;
+      return payload;
+    }
+
+    nasConnectBtn.addEventListener('click', async function () {
+      if (state.nasSaving) return;
+      const payload = nasServerPayload(nasShareStatus);
+      if (!payload) return;
+      if (!payload.password && (nasServerChanged() || !state.loadedNas?.hasPassword)) {
+        U.setAlert(nasShareStatus, '请输入这个 NAS 账号的密码，再连接。', 'error');
+        nasPasswordInput.focus();
+        return;
+      }
+      const req = gate.begin('nasShares');
+      const current = activeShareControl().value;
+      nasDiscovering = true;
+      nasConnectBtn.disabled = true;
+      nasConnectBtn.textContent = '正在连接…';
+      U.setAlert(nasShareStatus, '正在读取可访问的共享文件夹…', 'info');
+      try {
+        const result = await Api.discoverAdminNasShares(payload, req.signal);
+        if (!req.isCurrent()) return;
+        const names = [];
+        if (Array.isArray(result && result.shares)) {
+          for (const name of result.shares) {
+            if (typeof name === 'string' && name !== '' && !names.includes(name)) {
+              names.push(name);
+            }
+          }
+        }
+        if (names.length) {
+          renderShareOptions(names, current);
+          setShareMode(false);
+          U.setAlert(nasShareStatus, '找到 ' + names.length + ' 个共享文件夹。请选择一个并保存。', 'success');
+        } else {
+          renderShareOptions([], '');
+          U.setAlert(nasShareStatus, '已连上 NAS，但没有列出可读取的共享文件夹。请检查该账号的文件夹权限，或点「手动填写」后测试。', 'warning');
+        }
+        updateNasIndicators();
+      } catch (err) {
+        if (req.isCurrent() && !(err && err.isAbort)) {
+          U.setAlert(nasShareStatus, (err && err.message) || '无法连接 NAS，请检查地址和账号。', 'error');
+        }
+      } finally {
+        if (req.isCurrent()) {
+          nasDiscovering = false;
+          nasConnectBtn.disabled = state.nasSaving;
+          nasConnectBtn.textContent = '连接 NAS';
+        }
+        req.finish();
+      }
+    });
 
     nasForm.addEventListener('submit', async function (event) {
       event.preventDefault();
@@ -241,54 +386,28 @@
       U.clearAlert(nasAlert);
       U.clearAlert(nasTestResult);
 
-      const host = nasHostInput.value.trim();
-      const portRaw = nasPortInput.value.trim();
-      const port = Number(portRaw);
-      const share = nasShareInput.value.trim();
-      const username = nasUsernameInput.value.trim();
-      const domain = nasDomainInput.value.trim();
-      const password = nasPasswordInput.value;
-
-      if (!host) {
-        U.setAlert(nasAlert, '请填写 NAS 服务器地址（Host / IP）。', 'error');
-        nasHostInput.focus();
+      const payload = nasServerPayload(nasAlert);
+      if (!payload) return;
+      const choice = activeShareControl();
+      if (!choice.value) {
+        U.setAlert(nasAlert, '请先连接 NAS，再选择共享文件夹；也可以手动填写。', 'error');
+        (choice.disabled ? nasConnectBtn : choice).focus();
         return;
       }
-      if (!Number.isInteger(port) || port < 1 || port > 65535) {
-        U.setAlert(nasAlert, '端口必须是 1 到 65535 之间的整数（SMB 默认 445）。', 'error');
-        nasPortInput.focus();
-        return;
-      }
-      if (!share) {
-        U.setAlert(nasAlert, '请填写 SMB 共享名称（Share）。', 'error');
-        nasShareInput.focus();
-        return;
-      }
-
-      if (!username) {
-        U.setAlert(nasAlert, '请填写访问共享的只读 SMB 账号，不支持匿名共享。', 'error');
-        nasUsernameInput.focus();
-        return;
-      }
-      if (!password && nasPasswordInput.required) {
-        U.setAlert(nasAlert, '首次配置或更改连接信息时，请输入该 SMB 账号的密码。', 'error');
+      if (!payload.password && isNasPasswordRequired()) {
+        U.setAlert(nasAlert, '首次配置或保存连接变更时，请输入 NAS 密码。', 'error');
         nasPasswordInput.focus();
         return;
       }
-
-      const payload = {
-        host: host,
-        port: port,
-        share: share,
-        username: username,
-        domain: domain,
-      };
-      // 修改时留空密码则不发送，保留原密码
-      if (password !== '') {
-        payload.password = password;
+      payload.share = choice.value;
+      if (nasDiscovering) {
+        cancelShareSearch();
+      } else {
+        gate.abort('nasShares');
       }
-
       state.nasSaving = true;
+      nasConnectBtn.disabled = true;
+      nasConnectBtn.textContent = '连接 NAS';
       nasSaveBtn.disabled = true;
       nasSaveBtn.textContent = '保存中…';
 
@@ -304,6 +423,7 @@
         U.setAlert(nasAlert, err.message || '保存 NAS 配置失败。', 'error');
       } finally {
         state.nasSaving = false;
+        nasConnectBtn.disabled = false;
         nasSaveBtn.disabled = false;
         nasSaveBtn.textContent = '保存配置';
       }
@@ -1576,10 +1696,13 @@
       state.users = [];
       nasHostInput.value = '';
       nasPortInput.value = '445';
-      nasShareInput.value = '';
+      nasManualInput.value = '';
       nasDomainInput.value = '';
       nasUsernameInput.value = '';
       nasPasswordInput.value = '';
+      setShareMode(false);
+      resetShareSearch();
+      updateNasIndicators();
       rootCreateLabel.value = '';
       rootCreatePath.value = '';
       userCreateUsername.value = '';

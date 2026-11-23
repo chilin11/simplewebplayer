@@ -231,6 +231,10 @@
       });
     },
 
+    discoverAdminNasShares: function (payload, signal) {
+      return request('/api/admin/nas/shares', { method: 'POST', body: payload, signal: signal });
+    },
+
     updateAdminNas: function (payload) {
       return request('/api/admin/nas', {
         method: 'PUT',

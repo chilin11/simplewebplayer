@@ -45,6 +45,12 @@ type Backend interface {
 	Stream(w http.ResponseWriter, r *http.Request, settings Settings, base, path string) error
 }
 
+// ShareBrowser is an optional capability used by the admin setup form. It
+// never persists settings. Names are unescaped top-level SMB disk shares.
+type ShareBrowser interface {
+	DiscoverShares(context.Context, Settings) ([]string, error)
+}
+
 // NormalizePath validates without trimming or resolving path segments: the empty
 // string alone means the root. Leading spaces and Unicode whitespace are legal.
 func NormalizePath(path string) (string, error) {
@@ -86,11 +92,22 @@ func validSegment(s string) bool {
 	return units <= 255
 }
 
-// ValidateSettings accepts a bare host (not a URL/UNC path) and a single share.
-// Password is validated separately by the API so rotation can omit the field.
+// ValidateSettings accepts a bare NAS host and a single top-level share.
 func ValidateSettings(s Settings) error {
-	if len(s.Host) == 0 || len(s.Host) > 253 || s.Port < 1 || s.Port > 65535 || !validSegment(s.Share) {
-		return errors.New("请填写有效的 NAS 主机、端口和共享名")
+	if !IsShareName(s.Share) {
+		return errors.New("请选择有效的 NAS 共享文件夹")
+	}
+	return ValidateServer(s)
+}
+
+// IsShareName accepts one share segment, not a filesystem path or IPC$.
+func IsShareName(s string) bool { return validSegment(s) && !strings.EqualFold(s, "IPC$") }
+
+// ValidateServer performs validation that does not depend on a selected share.
+// Password is validated separately by the API so rotation can omit the field.
+func ValidateServer(s Settings) error {
+	if len(s.Host) == 0 || len(s.Host) > 253 || s.Port < 1 || s.Port > 65535 {
+		return errors.New("请填写有效的 NAS 地址和端口")
 	}
 	if net.ParseIP(s.Host) == nil {
 		for _, label := range strings.Split(strings.TrimSuffix(s.Host, "."), ".") {

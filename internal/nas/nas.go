@@ -75,13 +75,16 @@ func unsafePath() *media.Error {
 }
 
 func accessDenied() *media.Error {
-	return problem(http.StatusForbidden, "nas_access_denied", "NAS 认证失败或拒绝访问")
+	return problem(http.StatusForbidden, "nas_access_denied", "该 NAS 账号没有读取这个共享文件夹的权限。请在 DSM「控制面板 → 共享文件夹」检查用户权限。")
 }
 
 func publicError(err error) error {
 	var known *media.Error
 	if errors.As(err, &known) {
 		return known
+	}
+	if smbTransportFailed(err) {
+		return nasUnreachable()
 	}
 	if errors.Is(err, os.ErrPermission) {
 		return accessDenied()
@@ -94,7 +97,7 @@ func publicError(err error) error {
 		switch response.Code {
 		case 0x8000002d, 0xc0000257, 0xc000026d: // STOPPED_ON_SYMLINK, PATH_NOT_COVERED, DFS_UNAVAILABLE
 			return unsafePath()
-		case 0xc000006a, 0xc000006d, 0xc0000071: // WRONG_PASSWORD, LOGON_FAILURE, PASSWORD_EXPIRED
+		case 0xc0000022, 0xc000006a, 0xc000006d, 0xc0000071: // ACCESS_DENIED, WRONG_PASSWORD, LOGON_FAILURE, PASSWORD_EXPIRED
 			return accessDenied()
 		case 0xc000000f, 0xc00000ba, 0xc00000cc, 0xc0000103: // NO_SUCH_FILE, FILE_IS_A_DIRECTORY, BAD_NETWORK_NAME, NOT_A_DIRECTORY
 			return notFound()

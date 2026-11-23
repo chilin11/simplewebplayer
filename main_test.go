@@ -104,7 +104,29 @@ func TestLinuxPlaybackFlow(t *testing.T) {
 		t.Fatal("embedded frontend or CSP missing")
 	}
 	request(admin, "GET", "/assets/app.js", nil, "", 200)
+	iconHeader, icon := request(admin, "GET", "/assets/favicon.svg", nil, "", 200)
+	if !bytes.Contains(html, []byte(`href="/assets/favicon.svg"`)) || !strings.HasPrefix(iconHeader.Get("Content-Type"), "image/svg+xml") || !bytes.Contains(icon, []byte("<svg")) {
+		t.Fatal("embedded browser tab icon missing")
+	}
 	request(admin, "POST", "/api/login", obj("username", "fixture-admin", "password", adminPassword), "", 200)
+	_, shares := request(admin, "POST", "/api/admin/nas/shares", obj("host", host, "port", port, "username", "smbfixture", "password", nasPassword), "", 200)
+	var preview struct{ Shares []string }
+	if err := json.Unmarshal(shares, &preview); err != nil || len(preview.Shares) != 1 || preview.Shares[0] != "media" {
+		t.Fatalf("preview should include only the readable visible disk share: %s", shares)
+	}
+	_, empty := request(admin, "GET", "/api/admin/nas", nil, "", 200)
+	if !bytes.Contains(empty, []byte(`"nas":null`)) {
+		t.Fatal("preview must not persist any NAS settings")
+	}
+	_, authErr := request(admin, "POST", "/api/admin/nas/shares", obj("host", host, "port", port, "username", "smbfixture", "password", "wrong-fixture-password"), "", 403)
+	if !bytes.Contains(authErr, []byte(`"nas_auth_failed"`)) {
+		t.Fatal("invalid credentials should be distinguished from share errors")
+	}
+	request(admin, "PUT", "/api/admin/nas", obj("host", host, "port", port, "share", "no-such-share", "username", "smbfixture", "password", nasPassword), "", 200)
+	_, missingShare := request(admin, "POST", "/api/admin/nas/test", obj(), "", 404)
+	if !bytes.Contains(missingShare, []byte(`"nas_share_not_found"`)) {
+		t.Fatal("missing SMB share should be distinguished from authentication errors")
+	}
 	_, conf := request(admin, "PUT", "/api/admin/nas", obj("host", host, "port", port, "share", "media", "username", "smbfixture", "password", nasPassword), "", 200)
 	if bytes.Contains(conf, []byte(nasPassword)) {
 		t.Fatal("configuration returns the SMB secret")

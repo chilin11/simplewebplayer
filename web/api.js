@@ -153,6 +153,35 @@
       });
     },
 
+    // 投屏（Google Cast）：由服务端在同一 IPv4 局域网内发现并控制电视，浏览器不直接联系电视
+    discoverCastDevices: function (signal) {
+      return request('/api/cast/discover', {
+        method: 'POST',
+        body: {},
+        signal: signal,
+      });
+    },
+
+    startCast: function (rootId, deviceId, relPath, startSeconds, signal) {
+      return request('/api/library/' + encodeURIComponent(String(rootId)) + '/cast', {
+        method: 'POST',
+        body: {
+          deviceId: String(deviceId),
+          path: relPath ? String(relPath) : '',
+          startSeconds: startSeconds,
+        },
+        signal: signal,
+      });
+    },
+
+    stopCast: function (castId, signal) {
+      return request('/api/cast/stop', {
+        method: 'POST',
+        body: { castId: String(castId) },
+        signal: signal,
+      });
+    },
+
     // 会话与认证
     getSession: function (signal) {
       return request('/api/session', {

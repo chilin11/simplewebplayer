@@ -95,7 +95,9 @@ func tokenHash(r *http.Request) []byte {
 	return digest(c.Value)
 }
 func sessionUser(tx *sql.Tx, r *http.Request) (*User, error) {
-	h := tokenHash(r)
+	return sessionUserByHash(tx, tokenHash(r))
+}
+func sessionUserByHash(tx *sql.Tx, h []byte) (*User, error) {
 	if h == nil {
 		return nil, nil
 	}
@@ -120,7 +122,7 @@ func (c *call) logout(tx *sql.Tx) error {
 		return e
 	}
 	c.status = 204
-	c.after = func() error { c.setCookie("", -1); return nil }
+	c.after = func() error { c.app.casts.forgetSession(tokenHash(c.r)); c.setCookie("", -1); return nil }
 	return nil
 }
 func limited() error { return &apiError{429, "rate_limited", "登录尝试过多，请稍后再试"} }
@@ -230,6 +232,7 @@ func (c *call) login() error {
 	if e != nil {
 		return e
 	}
+	a.casts.forgetSession(tokenHash(c.r)) // successful login rotated the previous session
 	c.setCookie(token, int(sessionTTL/time.Second))
 	return nil
 }

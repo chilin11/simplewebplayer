@@ -27,6 +27,11 @@
       { tag: 'line', attrs: { x1: '17', y1: '15', x2: '21', y2: '15' } },
     ],
     chevron: [{ tag: 'polyline', attrs: { points: '9 6 15 12 9 18' } }],
+    tv: [
+      { tag: 'rect', attrs: { x: '2', y: '4', width: '20', height: '13', rx: '2' } },
+      { tag: 'line', attrs: { x1: '8', y1: '21', x2: '16', y2: '21' } },
+      { tag: 'line', attrs: { x1: '12', y1: '17', x2: '12', y2: '21' } },
+    ],
     download: [
       { tag: 'path', attrs: { d: 'M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4' } },
       { tag: 'polyline', attrs: { points: '7 10 12 15 17 10' } },

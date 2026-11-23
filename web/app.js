@@ -29,6 +29,14 @@
     playerDownloadBusy: false,
     // 列表行下载预检：键为 rootId + path，各自独立，防止重复点击
     entryDownloads: Object.create(null),
+    // 投屏：session 为服务端确认成功的投屏（含当时的影片来源），与本地播放器独立；
+    // generation 在退出登录时递增，使所有尚未返回的投屏请求失效。
+    cast: {
+      session: null,
+      starting: null,
+      stoppingCastId: null,
+      generation: 0,
+    },
     loggingIn: false,
     loggingOut: false,
   };
@@ -83,6 +91,17 @@
   const playerDownloadBtn = document.getElementById('player-download-btn');
   const playerDownloadLabel = document.getElementById('player-download-label');
   const playerDownloadAlert = document.getElementById('player-download-alert');
+  const playerCastBtn = document.getElementById('player-cast-btn');
+  const playerCastLabel = document.getElementById('player-cast-label');
+  const playerCastLive = document.getElementById('player-cast-live');
+  const castStatusBox = document.getElementById('cast-status');
+  const castStatusPrefix = document.getElementById('cast-status-prefix');
+  const castStatusDevice = document.getElementById('cast-status-device');
+  const castStatusFile = document.getElementById('cast-status-file');
+  const castStatusNote = document.getElementById('cast-status-note');
+  const castStopBtn = document.getElementById('cast-stop-btn');
+  const castStopLabel = document.getElementById('cast-stop-label');
+  const castStopAlert = document.getElementById('cast-stop-alert');
   const playerReloadBtn = document.getElementById('player-reload-btn');
   const playerCloseBtn = document.getElementById('player-close-btn');
   const playerErrorBox = document.getElementById('player-error');
@@ -189,6 +208,7 @@
     playerCurrentMeta.hidden = false;
     U.clearAlert(playerErrorBox);
     renderBrowserEntries();
+    renderCastStatus();
     if (hadActionFocus) {
       playerHeading.focus({ preventScroll: true });
     }
@@ -249,6 +269,7 @@
     }
 
     renderBrowserEntries();
+    renderCastStatus();
 
     if (window.innerWidth <= 1024) {
       videoEl.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
@@ -485,6 +506,554 @@
       req.finish();
     }
   }
+
+  // ---------- 投屏到电视（Google Cast） ----------
+  // 由 Linux 服务端在同一 IPv4 子网内发现电视并下发播放；浏览器只调用同源 JSON 接口，
+  // 不直接联系电视、也拿不到媒体临时地址。本地播放器只在投屏成功且仍是同一来源时暂停。
+  const CAST_FRIENDLY_EXTS = { MP4: true, M4V: true, WEBM: true };
+
+  function sameSource(a, b) {
+    return Boolean(a && b && String(a.rootId) === String(b.rootId) && a.path === b.path);
+  }
+
+  function formatClock(totalSeconds) {
+    const sec = Math.max(0, Math.floor(totalSeconds || 0));
+    const h = Math.floor(sec / 3600);
+    const m = Math.floor((sec % 3600) / 60);
+    const s = sec % 60;
+    const mm = h > 0 && m < 10 ? '0' + m : String(m);
+    const ss = s < 10 ? '0' + s : String(s);
+    return (h > 0 ? h + ':' : '') + mm + ':' + ss;
+  }
+
+  function currentStartSeconds() {
+    const t = videoEl.currentTime;
+    if (typeof t !== 'number' || !isFinite(t) || t < 0) {
+      return 0;
+    }
+    return Math.floor(t);
+  }
+
+  function castHelpDetails(open) {
+    const tips = [
+      '手机 / 电脑需通过家里的局域网地址直接打开播放器；经 Internet / Cloudflare 等外网地址访问时无法投屏。',
+      '播放器服务器与电视须在同一网段（同一路由器 / 同一 Wi-Fi），不要连接访客 Wi-Fi，并在路由器中关闭“AP 隔离 / 客户端隔离”。',
+      'Google TV / Android TV 请确认已开启内置 Chromecast（Google Cast），电视需开机或处于可唤醒状态。',
+      '电视端优先支持 MP4（H.264 视频 + AAC 音频）；MKV、AVI 等格式会被服务端拒绝，HEVC / AC3 等编码也可能无法播放。',
+      '仅支持 Google Cast 设备；不支持 AirPlay、Miracast、DLNA 或屏幕镜像。',
+    ];
+    const list = U.el('ul', { className: 'cast-help-list' });
+    for (let i = 0; i < tips.length; i += 1) {
+      list.appendChild(U.el('li', { text: tips[i] }));
+    }
+    return U.el('details', { className: 'cast-help', props: { open: Boolean(open) } }, [
+      U.el('summary', { text: '找不到电视或无法播放？' }),
+      list,
+    ]);
+  }
+
+  function describeCastError(err, phase) {
+    const status = err && typeof err.status === 'number' ? err.status : 0;
+    const serverMsg = err && err.message ? String(err.message) : '';
+    if (status === 0) {
+      return '网络连接失败，请确认播放器服务在线后重试。';
+    }
+    if (status === 400 || status === 415 || status === 422) {
+      return (
+        (serverMsg || '该视频无法投屏。') +
+        (phase === 'start' ? ' 建议使用 MP4（H.264 + AAC）格式。' : '')
+      );
+    }
+    if (status === 403) {
+      return (serverMsg || '当前无法投屏。') + ' 投屏只能在家中局域网内直接访问播放器时使用。';
+    }
+    if (status === 404) {
+      return serverMsg || (phase === 'start' ? '找不到该电视或视频，请重新搜索后再试。' : '找不到该投屏。');
+    }
+    if (status === 502 || status === 503 || status === 504) {
+      return (serverMsg || '无法连接电视。') + ' 请确认电视已开机并与服务器在同一网段。';
+    }
+    return serverMsg || '投屏操作失败，请稍后重试。';
+  }
+
+  function renderCastButton() {
+    const session = state.cast.session;
+    const starting = state.cast.starting;
+    const startingHere = Boolean(starting && sameSource(starting.source, state.activeVideo));
+    const liveHere = Boolean(session && sameSource(session.source, state.activeVideo));
+    playerCastBtn.classList.toggle('is-busy', startingHere);
+    playerCastBtn.setAttribute('aria-busy', startingHere ? 'true' : 'false');
+    playerCastBtn.classList.toggle('is-live', liveHere && !startingHere);
+    playerCastLabel.textContent = startingHere ? '正在投放…' : liveHere ? '电视播放中' : '投屏到电视';
+    playerCastLive.hidden = !liveHere || startingHere;
+  }
+
+  function renderCastStatus() {
+    renderCastButton();
+    const session = state.cast.session;
+    if (!session) {
+      castStatusBox.hidden = true;
+      castStatusDevice.textContent = '';
+      castStatusFile.textContent = '';
+      U.clearAlert(castStopAlert);
+      return;
+    }
+    const stopping = state.cast.stoppingCastId === session.castId;
+    const differs = !sameSource(session.source, state.activeVideo);
+    castStatusPrefix.textContent = stopping
+      ? '正在停止投屏：'
+      : session.unconfirmed
+        ? '无法确认是否已停止：'
+        : '正在投屏到';
+    castStatusDevice.textContent = session.deviceName;
+    castStatusFile.textContent = session.source.name;
+    castStatusNote.textContent = state.activeVideo
+      ? '本地已换成其他影片，电视上仍在播放上面这部；停止投屏只会停止电视上的这一部。'
+      : '本地播放器已关闭，电视上仍在播放上面这部。';
+    castStatusNote.hidden = !differs || Boolean(session.unconfirmed);
+    castStatusBox.classList.toggle('is-stale', differs && Boolean(state.activeVideo));
+    castStopBtn.classList.toggle('is-busy', stopping);
+    castStopBtn.setAttribute('aria-busy', stopping ? 'true' : 'false');
+    castStopBtn.setAttribute('aria-disabled', stopping ? 'true' : 'false');
+    castStopLabel.textContent = stopping ? '正在停止…' : '停止投屏';
+    castStatusBox.hidden = false;
+  }
+
+  // 退出登录 / 会话失效：只清本地状态，并让所有在途的投屏请求失效
+  function resetCastState() {
+    gate.abort('castDiscover');
+    gate.abort('castStart');
+    gate.abort('castStop');
+    state.cast.generation += 1;
+    state.cast.session = null;
+    state.cast.starting = null;
+    state.cast.stoppingCastId = null;
+    renderCastStatus();
+  }
+
+  function openCastDialog() {
+    const video = state.activeVideo;
+    if (!video) {
+      return;
+    }
+    if (state.cast.starting) {
+      U.showToast('正在连接电视，请稍候…', 'info');
+      return;
+    }
+    // 页面一次只管理一台电视：已有投屏记录时，先引导用户明确停止并确认，不覆盖旧的控制记录
+    if (state.cast.session) {
+      if (castStopAlert.hidden) {
+        U.setAlert(
+          castStopAlert,
+          '一次只能管理一台电视：请先点「停止投屏」，确认「' +
+            state.cast.session.deviceName +
+            '」已停止后，再投放其他影片或电视。',
+          'info'
+        );
+      }
+      castStatusBox.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      castStopBtn.focus({ preventScroll: true });
+      return;
+    }
+    // 弹窗内的投放目标在打开时固定，不随后续切换而变
+    const source = {
+      rootId: video.rootId,
+      path: video.path,
+      name: video.name,
+      streamUrl: video.streamUrl,
+    };
+    const ext = getFileExtLabel(video.name);
+    const generation = state.cast.generation;
+    let devices = [];
+    let phase = 'searching';
+    let errorText = '';
+    let castingDeviceId = null;
+    let castErrorText = '';
+    let closed = false;
+
+    const startPreview = U.el('p', { className: 'cast-target-time' });
+    const targetBox = U.el('div', { className: 'cast-target' }, [
+      U.el('span', { className: 'cast-target-label', text: '要投放的影片' }),
+      U.el('p', { className: 'cast-target-name', text: source.name }),
+      startPreview,
+    ]);
+
+    const formatNote = ext && !CAST_FRIENDLY_EXTS[ext]
+      ? U.el('div', { className: 'alert alert-warning', attrs: { role: 'note' } }, [
+          U.el('span', {
+            className: 'alert-text',
+            text:
+              '「.' + ext.toLowerCase() + '」格式通常无法投到电视，服务端会拒绝该格式。' +
+              '建议先转成 MP4（H.264 视频 + AAC 音频）后再投屏。',
+          }),
+        ])
+      : null;
+
+    const statusLine = U.el('p', { className: 'cast-dialog-status', attrs: { role: 'status', 'aria-live': 'polite' } });
+    const listBox = U.el('div', { className: 'cast-device-area' });
+    const castAlert = U.el('div', { className: 'alert alert-error', attrs: { role: 'alert' }, props: { hidden: true } });
+    const help = castHelpDetails(false);
+
+    const rescanBtn = U.el('button', {
+      className: 'btn btn-secondary',
+      text: '重新搜索',
+      props: { type: 'button' },
+      on: {
+        click: function () {
+          if (castingDeviceId !== null || phase === 'searching') {
+            return;
+          }
+          discover();
+        },
+      },
+    });
+    const closeBtn = U.el('button', {
+      className: 'btn btn-ghost',
+      text: '关闭',
+      props: { type: 'button' },
+      on: {
+        click: function () {
+          U.closeModal();
+        },
+      },
+    });
+
+    function stillOpen() {
+      return !closed && generation === state.cast.generation;
+    }
+
+    function render() {
+      startPreview.textContent =
+        sameSource(source, state.activeVideo) && currentStartSeconds() > 0
+          ? '将从 ' + formatClock(currentStartSeconds()) + ' 处续播'
+          : '将从头开始播放';
+
+      const busySearch = phase === 'searching';
+      rescanBtn.textContent = busySearch ? '搜索中…' : '重新搜索';
+      rescanBtn.classList.toggle('is-busy', busySearch);
+      rescanBtn.setAttribute('aria-busy', busySearch ? 'true' : 'false');
+      rescanBtn.setAttribute('aria-disabled', busySearch || castingDeviceId !== null ? 'true' : 'false');
+
+      if (castErrorText) {
+        U.setAlert(castAlert, castErrorText, 'error');
+      } else {
+        U.clearAlert(castAlert);
+      }
+
+      const nodes = [];
+      if (phase === 'searching') {
+        statusLine.textContent = '正在局域网内搜索电视，约需几秒…';
+        nodes.push(
+          U.el('div', { className: 'cast-searching' }, [
+            U.el('span', { className: 'spinner spinner-sm', attrs: { 'aria-hidden': 'true' } }),
+            U.el('span', { text: '正在搜索同一网络中的 Google Cast 电视…' }),
+          ])
+        );
+      } else if (phase === 'error') {
+        statusLine.textContent = '搜索失败';
+        nodes.push(
+          U.el('div', { className: 'cast-empty' }, [
+            U.el('p', { className: 'cast-empty-title', text: '无法搜索电视' }),
+            U.el('p', { className: 'cast-empty-sub', text: errorText }),
+          ])
+        );
+      } else if (devices.length === 0) {
+        statusLine.textContent = '没有找到电视';
+        nodes.push(
+          U.el('div', { className: 'cast-empty' }, [
+            U.el('p', { className: 'cast-empty-title', text: '没有找到可投屏的电视' }),
+            U.el('p', {
+              className: 'cast-empty-sub',
+              text: '请确认电视已开机、与播放器服务器在同一网段，然后点“重新搜索”。',
+            }),
+          ])
+        );
+      } else {
+        statusLine.textContent =
+          castingDeviceId !== null ? '正在连接电视…' : '找到 ' + devices.length + ' 台电视，请选择要投放的设备';
+        const list = U.el('ul', { className: 'cast-device-list', attrs: { 'aria-label': '可用电视' } });
+        for (let i = 0; i < devices.length; i += 1) {
+          list.appendChild(U.el('li', null, renderDeviceButton(devices[i])));
+        }
+        nodes.push(list);
+      }
+
+      // 重绘列表时保留键盘焦点所在的设备
+      const focusedId =
+        document.activeElement && listBox.contains(document.activeElement)
+          ? document.activeElement.getAttribute('data-device-id')
+          : null;
+      listBox.replaceChildren.apply(listBox, nodes);
+      if (focusedId !== null) {
+        const again = listBox.querySelector('[data-device-id="' + CSS.escape(focusedId) + '"]');
+        if (again) {
+          again.focus({ preventScroll: true });
+        }
+      }
+      help.open = help.open || phase === 'error' || (phase === 'ready' && devices.length === 0);
+    }
+
+    function renderDeviceButton(device) {
+      const busy = castingDeviceId === device.id;
+      const locked = castingDeviceId !== null;
+      const btn = U.el(
+        'button',
+        {
+          className: 'cast-device' + (busy ? ' is-busy' : ''),
+          props: { type: 'button' },
+          attrs: {
+            'data-device-id': device.id,
+            'aria-busy': busy ? 'true' : 'false',
+            'aria-disabled': locked ? 'true' : 'false',
+          },
+          on: {
+            click: function () {
+              startCastTo(device);
+            },
+          },
+        },
+        [
+          U.el('span', { className: 'cast-device-icon', attrs: { 'aria-hidden': 'true' } }, U.createIcon('tv', 20)),
+          U.el('span', { className: 'cast-device-text' }, [
+            U.el('span', { className: 'cast-device-name', text: device.name }),
+            device.model ? U.el('span', { className: 'cast-device-model', text: device.model }) : null,
+          ]),
+          U.el('span', { className: 'cast-device-action', text: busy ? '连接中…' : '投放' }),
+        ]
+      );
+      return btn;
+    }
+
+    async function discover() {
+      const req = gate.begin('castDiscover');
+      phase = 'searching';
+      errorText = '';
+      castErrorText = '';
+      render();
+      try {
+        const res = await Api.discoverCastDevices(req.signal);
+        if (!req.isCurrent() || !stillOpen()) {
+          return;
+        }
+        const raw = res && Array.isArray(res.devices) ? res.devices : [];
+        devices = [];
+        for (let i = 0; i < raw.length; i += 1) {
+          const d = raw[i];
+          if (!d || d.id === undefined || d.id === null || String(d.id) === '') {
+            continue;
+          }
+          devices.push({
+            id: String(d.id),
+            name: d.name ? String(d.name) : '未命名电视',
+            model: d.model ? String(d.model) : '',
+          });
+        }
+        phase = 'ready';
+      } catch (err) {
+        if (!req.isCurrent() || !stillOpen() || (err && err.isAbort) || (err && err.status === 401)) {
+          return;
+        }
+        phase = 'error';
+        errorText = describeCastError(err, 'discover');
+      } finally {
+        req.finish();
+      }
+      render();
+    }
+
+    async function startCastTo(device) {
+      if (
+        castingDeviceId !== null ||
+        state.cast.starting ||
+        state.cast.session ||
+        generation !== state.cast.generation
+      ) {
+        return;
+      }
+      const startSeconds = sameSource(source, state.activeVideo) ? currentStartSeconds() : 0;
+      const req = gate.begin('castStart');
+      const pending = { source: source, deviceId: device.id };
+      state.cast.starting = pending;
+      castingDeviceId = device.id;
+      castErrorText = '';
+      render();
+      renderCastButton();
+
+      let succeeded = false;
+      try {
+        const res = await Api.startCast(source.rootId, device.id, source.path, startSeconds, req.signal);
+        if (!req.isCurrent() || generation !== state.cast.generation) {
+          return;
+        }
+        const cast = res && res.cast ? res.cast : null;
+        if (!cast || cast.id === undefined || cast.id === null) {
+          throw new Api.ApiError('投屏响应异常，请重试。', 500, 'BAD_RESPONSE', false);
+        }
+        state.cast.session = {
+          castId: String(cast.id),
+          deviceId: cast.deviceId !== undefined && cast.deviceId !== null ? String(cast.deviceId) : device.id,
+          deviceName: cast.deviceName ? String(cast.deviceName) : device.name,
+          source: source,
+        };
+        state.cast.stoppingCastId = null;
+        succeeded = true;
+
+        // 只在本地仍是同一来源时暂停，避免暂停用户已切换的新视频
+        if (sameSource(source, state.activeVideo) && state.activeVideo.streamUrl === source.streamUrl) {
+          videoEl.pause();
+        }
+        U.showToast('已投屏到「' + state.cast.session.deviceName + '」', 'success');
+      } catch (err) {
+        if (!req.isCurrent() || generation !== state.cast.generation || (err && err.isAbort) || (err && err.status === 401)) {
+          return;
+        }
+        // 失败不触碰本地播放器
+        castErrorText = '投屏到「' + device.name + '」失败：' + describeCastError(err, 'start');
+        if (!stillOpen()) {
+          U.showToast(castErrorText, 'error');
+        }
+      } finally {
+        if (state.cast.starting === pending) {
+          state.cast.starting = null;
+        }
+        castingDeviceId = null;
+        req.finish();
+        renderCastStatus();
+        if (stillOpen()) {
+          if (succeeded) {
+            U.closeModal();
+            castStopBtn.focus({ preventScroll: true });
+          } else {
+            render();
+          }
+        }
+      }
+    }
+
+    const content = [targetBox];
+    if (formatNote) {
+      content.push(formatNote);
+    }
+    content.push(statusLine, listBox, castAlert, help);
+
+    U.openModal({
+      title: '投屏到电视',
+      content: content,
+      footer: [closeBtn, rescanBtn],
+      initialFocus: rescanBtn,
+      onClose: function () {
+        closed = true;
+        // 只取消搜索；已发出的投放请求继续等待，成功后仍会出现“停止投屏”
+        gate.abort('castDiscover');
+      },
+    });
+    discover();
+  }
+
+  async function stopActiveCast() {
+    const session = state.cast.session;
+    if (!session || state.cast.stoppingCastId === session.castId) {
+      return;
+    }
+    const generation = state.cast.generation;
+    const req = gate.begin('castStop');
+    state.cast.stoppingCastId = session.castId;
+    U.clearAlert(castStopAlert);
+    renderCastStatus();
+
+    function stillThisCast() {
+      return (
+        req.isCurrent() &&
+        generation === state.cast.generation &&
+        state.cast.session !== null &&
+        state.cast.session.castId === session.castId
+      );
+    }
+
+    try {
+      await Api.stopCast(session.castId, req.signal);
+      if (!stillThisCast()) {
+        return;
+      }
+      // 只有服务端成功（204）才视为已停止并清理记录
+      state.cast.session = null;
+      U.showToast('已停止「' + session.deviceName + '」上的投屏', 'success');
+    } catch (err) {
+      if (!stillThisCast() || (err && err.isAbort) || (err && err.status === 401)) {
+        return;
+      }
+      const retryBtn = U.el('button', {
+        className: 'btn btn-secondary btn-sm',
+        text: '重试停止',
+        props: { type: 'button' },
+        on: {
+          click: function () {
+            castStopBtn.focus();
+            stopActiveCast();
+          },
+        },
+      });
+      if (err && err.status === 404) {
+        // 服务端已无该控制记录：无法确认电视是否真的停了，不能当作停止成功；
+        // 保留记录与重试，并提供明示的“隐藏此记录”避免卡住后续投屏
+        session.unconfirmed = true;
+        const hideBtn = U.el('button', {
+          className: 'btn btn-ghost btn-sm',
+          text: '隐藏此记录',
+          props: { type: 'button' },
+          on: {
+            click: function () {
+              dismissUnconfirmedCast(session.castId);
+            },
+          },
+        });
+        U.setAlert(
+          castStopAlert,
+          '无法确认「' + session.deviceName + '」是否已停止，可用电视遥控器检查。若电视已不在播放，可隐藏此记录后再投放。',
+          'warning',
+          U.el('span', { className: 'btn-row' }, [retryBtn, hideBtn])
+        );
+        return;
+      }
+      U.setAlert(castStopAlert, '停止投屏失败：' + describeCastError(err, 'stop'), 'error', retryBtn);
+    } finally {
+      const hadFocus = castStatusBox.contains(document.activeElement);
+      if (req.isCurrent() && generation === state.cast.generation && state.cast.stoppingCastId === session.castId) {
+        state.cast.stoppingCastId = null;
+      }
+      req.finish();
+      if (generation === state.cast.generation) {
+        renderCastStatus();
+        if (hadFocus && castStatusBox.hidden) {
+          (state.activeVideo && !playerActions.hidden ? playerCastBtn : playerHeading).focus({ preventScroll: true });
+        }
+      }
+    }
+  }
+
+  // 用户明确隐藏无法确认状态的记录：只清本地显示，不声称电视已停止
+  function dismissUnconfirmedCast(castId) {
+    const session = state.cast.session;
+    if (!session || session.castId !== castId || !session.unconfirmed || state.cast.stoppingCastId === castId) {
+      return;
+    }
+    const hadFocus = castStatusBox.contains(document.activeElement);
+    gate.abort('castStop');
+    state.cast.session = null;
+    renderCastStatus();
+    U.showToast('已隐藏该投屏记录；如电视仍在播放，请用遥控器停止', 'info');
+    if (hadFocus) {
+      (state.activeVideo && !playerActions.hidden ? playerCastBtn : playerHeading).focus({ preventScroll: true });
+    }
+  }
+
+  playerCastBtn.addEventListener('click', openCastDialog);
+  castStopBtn.addEventListener('click', function () {
+    if (castStopBtn.getAttribute('aria-disabled') === 'true') {
+      return;
+    }
+    stopActiveCast();
+  });
 
   // 下载预检返回 403/404 时复核授权列表：独立通道，不取消浏览复核或手动刷新；按版本择新写入。
   async function recheckRootsAfterDownloadDenied() {
@@ -1144,6 +1713,7 @@
     state.libraryDirty = false;
     state.libraryDirtySince = state.rootsIssuedVersion;
     state.entryDownloads = Object.create(null);
+    resetCastState();
     setRootsRefreshing(false);
     browserLoading.hidden = true;
     browserFilterInput.value = '';

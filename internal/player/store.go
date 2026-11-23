@@ -10,17 +10,20 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/http"
 	"net/url"
 	"os"
 	"path/filepath"
 	"syscall"
 
 	_ "modernc.org/sqlite"
+	"simplewebplayer/internal/casting"
 	"simplewebplayer/internal/media"
 )
 
 type Options struct {
 	Media         media.Backend
+	Cast          casting.Transport
 	SecureCookies bool
 }
 type App struct {
@@ -29,6 +32,8 @@ type App struct {
 	opts      Options
 	hashSlots chan struct{}
 	dummy     []byte
+	casts     castRegistry
+	castLAN   func(*http.Request) (casting.LAN, bool)
 }
 
 const schema = `
@@ -164,7 +169,7 @@ func Open(dataDir string, opts Options) (*App, error) {
 		return nil, err
 	}
 	db.SetMaxOpenConns(1)
-	app := &App{db: db, box: box, opts: opts, hashSlots: make(chan struct{}, 2)}
+	app := &App{db: db, box: box, opts: opts, hashSlots: make(chan struct{}, 2), casts: newCastRegistry(), castLAN: casting.FromRequest}
 	if _, err = db.Exec("PRAGMA journal_mode=WAL"); err == nil {
 		err = app.transaction(context.Background(), func(tx *sql.Tx) error { _, e := tx.Exec(schema); return e })
 	}

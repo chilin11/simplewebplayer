@@ -139,6 +139,12 @@ func match(path string) route {
 				rt.methods = "GET"
 			}
 		}
+	case "cast":
+		if len(p) == 3 && (p[2] == "discover" || p[2] == "stop") {
+			rt.key, rt.methods, rt.private = "cast/"+p[2], "POST", true
+		} else if len(p) == 4 && p[2] == "media" && p[3] != "" {
+			rt.key, rt.id, rt.methods = "cast/media", p[3], "GET HEAD OPTIONS"
+		}
 	case "library":
 		rt.private = true
 		if len(p) == 2 {
@@ -146,6 +152,8 @@ func match(path string) route {
 			rt.methods = "GET"
 		} else if len(p) == 4 {
 			switch p[3] {
+			case "cast":
+				rt.key, rt.id, rt.methods = "cast/start", p[2], "POST"
 			case "browse":
 				rt.key, rt.id, rt.methods = p[3], p[2], "GET"
 			case "stream", "download":
@@ -209,6 +217,12 @@ func (a *App) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	w.Header().Set("Cross-Origin-Resource-Policy", "same-origin")
 	c := &call{app: a, w: w, r: r, route: match(r.URL.Path), status: 200}
+	if c.route.key == "cast/media" {
+		if err := c.castMedia(); err != nil {
+			writeError(w, err)
+		}
+		return
+	}
 	if err := c.run(); err != nil {
 		writeError(w, err)
 		return
@@ -264,6 +278,9 @@ func (c *call) run() error {
 			return e
 		}
 		c.user = u
+		if u == nil {
+			c.app.casts.forgetSession(tokenHash(r))
+		}
 		if rt.private && u == nil {
 			return &apiError{401, "unauthorized", "请先登录"}
 		}
@@ -282,6 +299,8 @@ func (c *call) run() error {
 			c.out = map[string]any{"user": u}
 		case "logout":
 			return c.logout(tx)
+		case "cast/start", "cast/discover", "cast/stop":
+			return c.castControl(tx)
 		case "users", "users/id", "grants":
 			return c.accounts(tx)
 		case "roots", "roots/id", "nas":

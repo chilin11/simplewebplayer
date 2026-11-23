@@ -35,6 +35,7 @@ type streamWriter struct {
 	http.ResponseWriter
 	started    bool
 	attachment string
+	castType   string
 }
 
 func (w *streamWriter) Unwrap() http.ResponseWriter { return w.ResponseWriter }
@@ -43,6 +44,10 @@ func (w *streamWriter) start(status int) {
 	// Wait until the first media response is committed; errors and 416 are not downloads.
 	if !w.started && w.attachment != "" && (status == http.StatusOK || status == http.StatusPartialContent) {
 		w.Header().Set("Content-Disposition", w.attachment)
+	}
+	if !w.started && w.castType != "" && (status == http.StatusOK || status == http.StatusPartialContent) {
+		w.Header().Set("Content-Type", w.castType)
+		castCORS(w.Header())
 	}
 	w.started = true
 }

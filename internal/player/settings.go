@@ -95,8 +95,12 @@ func (c *call) saveNAS(tx *sql.Tx, old *nasRow, obj object) error {
 			return invalid("NAS 密码无效")
 		}
 		secret = c.app.box.Seal(nil, nil, []byte(pw), nasAAD)
-	} else if old != nil {
+	} else if old != nil && old.settings == s {
+		// Never authenticate to a changed endpoint or account with a secret
+		// the administrator only intended to keep for the previous identity.
 		secret = old.secret
+	} else if old != nil {
+		return invalid("更换 NAS 连接信息时，请重新输入 SMB 密码")
 	} else {
 		return invalid("首次配置须输入 NAS 密码")
 	}

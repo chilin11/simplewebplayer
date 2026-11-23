@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"io"
 	"mime"
@@ -14,6 +15,7 @@ import (
 	"strings"
 	"testing"
 
+	"simplewebplayer/internal/castnet"
 	"simplewebplayer/internal/nas"
 	"simplewebplayer/internal/player"
 )
@@ -147,6 +149,43 @@ func TestLinuxPlaybackFlow(t *testing.T) {
 	h, _ = request(viewer, "GET", download, nil, "bytes=0-1", 404)
 	if h.Get("Content-Disposition") != "" {
 		t.Fatal("withdrawn grant produced an attachment")
+	}
+}
+
+// Exercise the actual application router with the production Cast transport;
+// a loopback connection must never start discovery, even with a valid login.
+func TestCastRouterRejectsLoopback(t *testing.T) {
+	app, err := player.Open(t.TempDir(), player.Options{Media: nas.New(), Cast: castnet.New()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer app.Close()
+	if err := app.InitAdmin("fixture-admin", "only-a-test-password"); err != nil {
+		t.Fatal(err)
+	}
+	h := routes(app)
+	post := func(path, body string, cookie *http.Cookie) *httptest.ResponseRecorder {
+		t.Helper()
+		r := httptest.NewRequest("POST", "http://127.0.0.1:8080"+path, strings.NewReader(body))
+		r.RemoteAddr = "127.0.0.1:31337"
+		r = r.WithContext(context.WithValue(t.Context(), http.LocalAddrContextKey, &net.TCPAddr{IP: net.IPv4(127, 0, 0, 1), Port: 8080}))
+		r.Header.Set("Content-Type", "application/json")
+		r.Header.Set("X-Player-Request", "1")
+		if cookie != nil {
+			r.AddCookie(cookie)
+		}
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, r)
+		return w
+	}
+	login := post("/api/login", `{"username":"fixture-admin","password":"only-a-test-password"}`, nil)
+	cookies := login.Result().Cookies()
+	if login.Code != 200 || len(cookies) != 1 {
+		t.Fatal("test login failed")
+	}
+	w := post("/api/cast/discover", `{}`, cookies[0])
+	if w.Code != http.StatusForbidden || !strings.Contains(w.Body.String(), "cast_lan_only") {
+		t.Fatalf("Cast discovery not blocked on loopback: HTTP %d", w.Code)
 	}
 }
 

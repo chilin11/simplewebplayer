@@ -134,36 +134,17 @@
     }
 
     // ---------- NAS SMB 配置与测试 ----------
+    function nasIdentityChanged() {
+      const base = state.loadedNas || {};
+      return nasHostInput.value.trim() !== (base.host || '') ||
+        Number(nasPortInput.value) !== (base.port || 445) ||
+        nasShareInput.value.trim() !== (base.share || '') ||
+        nasUsernameInput.value.trim() !== (base.username || '') ||
+        nasDomainInput.value.trim() !== (base.domain || '');
+    }
+
     function isNasFormDirty() {
-      if (!state.nasFetched) {
-        return false;
-      }
-      const base = state.loadedNas || {
-        host: '',
-        port: 445,
-        share: '',
-        username: '',
-        domain: '',
-      };
-      if (nasHostInput.value.trim() !== String(base.host || '')) {
-        return true;
-      }
-      if (nasPortInput.value.trim() !== String(base.port || 445)) {
-        return true;
-      }
-      if (nasShareInput.value.trim() !== String(base.share || '')) {
-        return true;
-      }
-      if (nasUsernameInput.value.trim() !== String(base.username || '')) {
-        return true;
-      }
-      if (nasDomainInput.value.trim() !== String(base.domain || '')) {
-        return true;
-      }
-      if (nasPasswordInput.value.length > 0) {
-        return true;
-      }
-      return false;
+      return state.nasFetched && (nasIdentityChanged() || nasPasswordInput.value.length > 0);
     }
 
     function updateNasIndicators() {
@@ -174,20 +155,22 @@
       } else if (!nas) {
         nasStatusBadge.textContent = '未配置';
         nasStatusBadge.className = 'badge badge-warning';
-        nasPasswordInput.placeholder = '请输入 SMB 密码（匿名共享可留空）';
-        nasPasswordHint.textContent = '密码保存后不会再次显示。';
+        nasPasswordInput.placeholder = '请输入只读 SMB 账号的密码';
+        nasPasswordHint.textContent = '首次配置必须输入密码，不支持匿名共享。';
       } else if (nas.hasPassword) {
         nasStatusBadge.textContent = '已配置（已保存密码）';
         nasStatusBadge.className = 'badge badge-success';
-        nasPasswordInput.placeholder = '留空则保留当前已保存密码';
-        nasPasswordHint.textContent = '已保存密码且不会回显；如需更换密码请直接输入新密码，留空保存将保留原密码。';
+        const changed = nasIdentityChanged();
+        nasPasswordInput.placeholder = changed ? '重新输入 SMB 密码' : '留空则保留已保存密码';
+        nasPasswordHint.textContent = changed ? '连接信息已更改，原密码不会用于新的连接。' : '同一连接可留空保留原密码，或输入新密码。已保存的密码不会回显。';
       } else {
         nasStatusBadge.textContent = '已配置（未设置密码）';
         nasStatusBadge.className = 'badge badge-primary';
-        nasPasswordInput.placeholder = '未保存密码，可输入新密码或留空';
+        nasPasswordInput.placeholder = '请输入 SMB 密码';
         nasPasswordHint.textContent = '当前未保存密码；输入密码并保存后不会再次显示。';
       }
 
+      nasPasswordInput.required = !nas || !nas.hasPassword || nasIdentityChanged();
       nasDirtyBadge.hidden = !isNasFormDirty();
     }
 
@@ -279,6 +262,17 @@
       if (!share) {
         U.setAlert(nasAlert, '请填写 SMB 共享名称（Share）。', 'error');
         nasShareInput.focus();
+        return;
+      }
+
+      if (!username) {
+        U.setAlert(nasAlert, '请填写访问共享的只读 SMB 账号，不支持匿名共享。', 'error');
+        nasUsernameInput.focus();
+        return;
+      }
+      if (!password && nasPasswordInput.required) {
+        U.setAlert(nasAlert, '首次配置或更改连接信息时，请输入该 SMB 账号的密码。', 'error');
+        nasPasswordInput.focus();
         return;
       }
 

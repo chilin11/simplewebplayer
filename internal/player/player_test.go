@@ -143,6 +143,13 @@ func TestGrantsAndCredentialLifecycle(t *testing.T) {
 	if strings.Contains(w.Body.String(), nasPW) {
 		t.Fatal("leaked NAS password")
 	}
+	// Without any roots, rotation is allowed, but only with an explicit
+	// password for the new identity. A rejected change must not alter storage.
+	want(t, req(a, admin, "PUT", nas, `{"host":"other.local","share":"films","username":"player"}`), 400)
+	want(t, req(a, admin, "PUT", nas, `{"host":"nas.local","share":"films","username":"different"}`), 400)
+	want(t, req(a, admin, "PUT", nas, `{"host":"nas.local","share":"films","username":"player"}`), 200)
+	want(t, req(a, admin, "PUT", nas, `{"host":"other.local","share":"films","username":"player","password":"replacement"}`), 200)
+	want(t, req(a, admin, "PUT", nas, `{"host":"nas.local","share":"films","username":"player","password":"`+nasPW+`"}`), 200)
 	want(t, req(a, admin, "POST", roots, `{"label":"Film","path":" movies"}`), 201)
 	want(t, req(a, admin, "PUT", nas, `{"host":"nas.local","share":"other","username":"player"}`), 409)
 	want(t, req(a, admin, "PUT", nas, `{"host":"nas.local","share":"films","username":"player"}`), 200)

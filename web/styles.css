@@ -1262,6 +1262,326 @@ select.input {
   margin: 0 var(--s6) var(--s4);
 }
 
+/* ---------- 投屏到电视 ---------- */
+.now-cast-btn {
+  position: relative;
+  min-height: 38px;
+  padding: 0 var(--s4);
+  font-size: 14px;
+}
+
+.now-cast-btn.is-busy svg {
+  display: none;
+}
+
+.now-cast-btn.is-live {
+  border-color: var(--accent-line);
+  background: var(--accent-soft);
+  color: var(--accent-strong);
+}
+
+.cast-live-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--success);
+  box-shadow: 0 0 0 3px var(--success-soft);
+}
+
+.cast-status {
+  margin: 0 var(--s6) var(--s4);
+  padding: var(--s3) var(--s4);
+  border: 1px solid var(--accent-line);
+  border-radius: var(--r-md);
+  background: linear-gradient(135deg, rgba(232, 165, 75, 0.12), rgba(232, 165, 75, 0.04));
+}
+
+.cast-status.is-stale {
+  border-color: rgba(231, 198, 108, 0.55);
+  border-style: dashed;
+}
+
+.cast-status-main {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--s3);
+}
+
+.cast-status-icon {
+  display: inline-grid;
+  flex: none;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  border-radius: var(--r-sm);
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.cast-status-text {
+  flex: 1 1 auto;
+}
+
+.cast-status-heading {
+  margin: 0;
+  color: var(--text-2);
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.cast-status-device {
+  color: var(--text);
+  font-size: 15px;
+  font-weight: 700;
+  white-space: pre-wrap;
+}
+
+.cast-status-file {
+  margin-top: 2px;
+  color: var(--text-2);
+  font-size: 13px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.cast-status-file-label {
+  color: var(--text-3);
+}
+
+.cast-status-file-name {
+  white-space: pre-wrap;
+}
+
+.cast-status-note {
+  margin-top: var(--s1);
+  color: var(--warning);
+  font-size: 12.5px;
+  line-height: 1.5;
+}
+
+.cast-stop-btn {
+  flex: none;
+  min-height: 36px;
+}
+
+.cast-status .alert {
+  margin: var(--s3) 0 0;
+}
+
+.cast-target {
+  margin-bottom: var(--s4);
+  padding: var(--s3) var(--s4);
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  background: var(--surface-2);
+}
+
+.cast-target-label {
+  color: var(--text-3);
+  font-size: 12px;
+  letter-spacing: 0.04em;
+}
+
+.cast-target-name {
+  margin-top: 2px;
+  color: var(--text);
+  font-size: 15px;
+  font-weight: 650;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+.cast-target-time {
+  margin-top: 2px;
+  color: var(--text-2);
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+}
+
+.modal-body .cast-target + .alert {
+  margin-bottom: var(--s4);
+}
+
+.cast-dialog-status {
+  margin-bottom: var(--s2);
+  color: var(--text-3);
+  font-size: 13px;
+}
+
+.cast-searching {
+  display: flex;
+  align-items: center;
+  gap: var(--s3);
+  min-height: 64px;
+  padding: var(--s3) var(--s4);
+  border: 1px dashed var(--line-strong);
+  border-radius: var(--r-md);
+  color: var(--text-2);
+  font-size: 14px;
+}
+
+.cast-empty {
+  padding: var(--s4);
+  border: 1px dashed var(--line-strong);
+  border-radius: var(--r-md);
+  text-align: center;
+}
+
+.cast-empty-title {
+  color: var(--text);
+  font-size: 15px;
+  font-weight: 650;
+}
+
+.cast-empty-sub {
+  margin-top: var(--s1);
+  color: var(--text-2);
+  font-size: 13px;
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+}
+
+.cast-device-list {
+  display: grid;
+  gap: var(--s2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.cast-device {
+  display: flex;
+  align-items: center;
+  gap: var(--s3);
+  width: 100%;
+  min-height: 56px;
+  padding: var(--s2) var(--s3);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-md);
+  background: var(--surface-2);
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.cast-device:hover:not([aria-disabled="true"]) {
+  border-color: var(--accent-line);
+  background: var(--surface-hover);
+}
+
+.cast-device:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+
+.cast-device[aria-disabled="true"] {
+  cursor: progress;
+}
+
+.cast-device[aria-disabled="true"]:not(.is-busy) {
+  opacity: 0.55;
+}
+
+.cast-device-icon {
+  display: inline-grid;
+  flex: none;
+  place-items: center;
+  width: 38px;
+  height: 38px;
+  border-radius: var(--r-sm);
+  background: var(--surface-3);
+  color: var(--accent);
+}
+
+.cast-device-text {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.cast-device-name {
+  font-size: 15px;
+  font-weight: 650;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+.cast-device-model {
+  color: var(--text-3);
+  font-size: 12.5px;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+
+.cast-device-current {
+  color: var(--accent);
+}
+
+.cast-device-action {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 6px;
+  min-height: 30px;
+  padding: 0 var(--s3);
+  border-radius: 999px;
+  background: var(--accent);
+  color: var(--accent-ink);
+  font-size: 13px;
+  font-weight: 650;
+}
+
+.cast-device.is-busy .cast-device-action::before {
+  content: "";
+  width: 10px;
+  height: 10px;
+  border: 2px solid currentColor;
+  border-right-color: transparent;
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
+.cast-device-area + .alert {
+  margin-top: var(--s3);
+}
+
+.cast-help {
+  margin-top: var(--s4);
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  background: var(--surface-2);
+  color: var(--text-2);
+  font-size: 13px;
+}
+
+.cast-help summary {
+  min-height: 38px;
+  padding: var(--s2) var(--s3);
+  color: var(--text);
+  cursor: pointer;
+}
+
+.cast-help summary:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+
+.cast-help-list {
+  margin: 0;
+  padding: 0 var(--s4) var(--s3) calc(var(--s4) + var(--s2));
+  line-height: 1.65;
+}
+
+.cast-help-list li + li {
+  margin-top: var(--s1);
+}
+
 .codec-notice {
   margin: 0 var(--s6) var(--s5);
   border: 1px solid var(--line);
@@ -2079,6 +2399,10 @@ select.input {
   border-left-color: var(--success);
 }
 
+.toast-info {
+  border-left-color: var(--info);
+}
+
 .toast-error {
   border-left-color: var(--danger);
 }
@@ -2280,6 +2604,39 @@ select.input {
 
   .player-panel > .alert {
     margin: 0 var(--s4) var(--s3);
+  }
+
+  /* 手机：下载 / 投屏各占半行，重新加载 / 关闭换到第二行 */
+  .now-actions {
+    flex-wrap: wrap;
+  }
+
+  .now-download-btn,
+  .now-actions > .btn.now-cast-btn {
+    flex: 1 1 40%;
+    min-width: 0;
+    padding: 0 var(--s3);
+  }
+
+  .now-actions > .btn:not(.now-download-btn):not(.now-cast-btn) {
+    flex: 1 1 30%;
+  }
+
+  .cast-status {
+    margin: 0 var(--s4) var(--s3);
+    padding: var(--s3);
+  }
+
+  .cast-status-main {
+    flex-wrap: wrap;
+  }
+
+  .cast-status-text {
+    flex-basis: calc(100% - 48px);
+  }
+
+  .cast-stop-btn {
+    flex: 1 1 100%;
   }
 
   .codec-notice {

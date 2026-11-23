@@ -214,10 +214,47 @@
                   </svg>
                   <span id="player-download-label">下载原视频</span>
                 </button>
+                <button id="player-cast-btn" type="button" class="btn btn-secondary btn-sm now-cast-btn" aria-haspopup="dialog" aria-describedby="player-now-title">
+                  <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <path d="M2 8V6a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-6"></path>
+                    <path d="M2 12a9 9 0 0 1 8 8"></path>
+                    <path d="M2 16a5 5 0 0 1 4 4"></path>
+                    <line x1="2" y1="20" x2="2.01" y2="20"></line>
+                  </svg>
+                  <span id="player-cast-label">投屏到电视</span>
+                  <span id="player-cast-live" class="cast-live-dot" hidden></span>
+                </button>
                 <button id="player-reload-btn" type="button" class="btn btn-secondary btn-sm">重新加载</button>
                 <button id="player-close-btn" type="button" class="btn btn-ghost btn-sm">关闭视频</button>
               </div>
             </div>
+
+            <!-- 投屏状态：独立于本地播放器，切换 / 关闭本地影片后仍可在此停止电视上的播放 -->
+            <section id="cast-status" class="cast-status" aria-labelledby="cast-status-heading" hidden>
+              <div class="cast-status-main">
+                <span class="cast-status-icon" aria-hidden="true">
+                  <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">
+                    <rect x="2" y="4" width="20" height="13" rx="2"></rect>
+                    <line x1="8" y1="21" x2="16" y2="21"></line>
+                    <line x1="12" y1="17" x2="12" y2="21"></line>
+                  </svg>
+                </span>
+                <div class="cast-status-text min-w-0">
+                  <h3 id="cast-status-heading" class="cast-status-heading">
+                    <span id="cast-status-prefix">正在投屏到</span>
+                    <span id="cast-status-device" class="cast-status-device"></span>
+                  </h3>
+                  <p class="cast-status-file">
+                    <span class="cast-status-file-label">电视播放：</span><span id="cast-status-file" class="cast-status-file-name"></span>
+                  </p>
+                  <p id="cast-status-note" class="cast-status-note" hidden>本地已换成其他影片，电视上仍在播放上面这部；停止投屏只会停止电视上的这一部。</p>
+                </div>
+                <button id="cast-stop-btn" type="button" class="btn btn-danger-outline btn-sm cast-stop-btn" aria-describedby="cast-status-heading">
+                  <span id="cast-stop-label">停止投屏</span>
+                </button>
+              </div>
+              <div id="cast-stop-alert" class="alert alert-error" role="alert" hidden></div>
+            </section>
 
             <div id="player-download-alert" class="alert alert-error" role="alert" hidden></div>
             <div id="player-error" class="alert alert-error" role="alert" hidden></div>
@@ -384,8 +421,8 @@
                 <legend class="form-section-title">访问凭据</legend>
                 <div class="form-grid">
                   <div class="field">
-                    <label for="nas-username" class="field-label">SMB 用户名<span class="field-optional">可选</span></label>
-                    <input id="nas-username" name="username" type="text" class="input" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="访问共享使用的账号">
+                    <label for="nas-username" class="field-label">SMB 用户名<span class="req" aria-hidden="true">*</span></label>
+                    <input id="nas-username" name="username" type="text" required class="input" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="访问共享使用的账号">
                   </div>
 
                   <div class="field">
@@ -399,7 +436,7 @@
                       placeholder="请输入密码"
                       aria-describedby="nas-password-hint"
                     >
-                    <p id="nas-password-hint" class="field-hint">密码保存后不会再次显示。</p>
+                    <p id="nas-password-hint" class="field-hint">首次配置须输入只读 SMB 账号的密码。保存后不会回显。</p>
                   </div>
                 </div>
               </fieldset>

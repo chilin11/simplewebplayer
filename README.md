@@ -7,12 +7,12 @@
 在 **Linux（systemd，x86_64 或 ARM64）** 的交互终端运行：
 
 ```sh
-wget -qO- https://github.com/chilin11/simplewebplayer/releases/latest/download/install.sh | sudo bash
+(installer=$(mktemp) && trap 'rm -f -- "$installer"' EXIT && wget -O "$installer" https://github.com/chilin11/simplewebplayer/releases/latest/download/install.sh && sudo bash "$installer")
 ```
 
 安装脚本会下载并校验 [GitHub Release](https://github.com/chilin11/simplewebplayer/releases/latest) 的 Go 二进制，创建低权限服务账号，启动服务并设置开机运行。首次安装时设置 `admin` 的密码（不会回显，没有默认密码）；安装结束会打印访问地址。默认选择检测到的局域网地址，检测不到则只监听 `127.0.0.1`，端口为 `8080`。
 
-**升级**：重跑同一条命令，保留 `/var/lib/simplewebplayer` 中的账号、NAS 配置及授权；也保留 `/etc/simplewebplayer/player.env`。如果需要调整监听地址或端口，修改这个配置文件的 `PLAYER_HOST` / `PLAYER_PORT`，然后执行 `sudo systemctl restart simplewebplayer`。局域网 HTTP 没有传输加密，只在可信网络使用。
+**升级**：先用 `/usr/local/bin/simplewebplayer --version` 记下当前版本。需要可回退时，先停服，以私有权限备份整个 `/var/lib/simplewebplayer/` 和 `/etc/simplewebplayer/player.env`，再重跑安装命令。安装器保留原账号、NAS 配置、目录授权和监听配置，但不会在启动检查失败时自动回退。失败时先看 `sudo journalctl -u simplewebplayer -n 50`。若需恢复，停服并保留当前数据副本，从备份成套恢复旧数据、密钥及配置（保持所有者和权限），把上面下载地址中的 `releases/latest/download` 换成 `releases/download/旧版本标签`，安装已知可用的版本。不要删除密钥或重新初始化管理员。如果需要调整监听地址或端口，修改这个配置文件的 `PLAYER_HOST` / `PLAYER_PORT`，然后执行 `sudo systemctl restart simplewebplayer`。局域网 HTTP 没有传输加密，只在可信网络使用。
 
 <details>
 <summary>手动运行 / 从源码构建</summary>
@@ -35,7 +35,7 @@ export PLAYER_DATA_DIR="$PWD/data"
 ## 配置 NAS 和授权
 
 1. 在 NAS 上创建专用 SMB **只读**账号。共享内只放可供这个应用管理的媒体，不要使用 NAS 管理员账号。关闭 SMB1，使用直连 SMB 共享，不使用 DFS、不允许服务端跟随链接（例如 Samba 配置 `follow symlinks = no`、`wide links = no`）。
-2. 登录网站，打开管理台 → **NAS 连接**，填写 NAS 主机或 IP（不是 URL）、TCP 端口（通常 445）、共享名称、用户名及密码，必要时填写域。保存后点测试连接。密码输入留空表示保留已保存密码，已存密码不会回显。
+2. 登录网站，打开管理台 → **NAS 连接**，填写 NAS 主机或 IP（不是 URL）、TCP 端口（通常 445）、共享名称、用户名及密码，必要时填写域。保存后点测试连接。不支持匿名 SMB。首次配置或更改连接信息须输入该账号的密码；只有连接信息不变时，留空才会保留已存密码。密码不会回显。
 3. 在 **授权目录** 浏览挑选路径并设置显示名称，例如 `Kids` 或 `Movies/Documentaries`。路径相对于 SMB 共享；只有真正的空路径才表示授权整个共享，通常应选具体文件夹。根路径建立后不可改；换路径请新建根、分配授权并移除旧根。NAS 地址/共享/账号等身份变化也需先移除旧根，避免旧权限指向新来源。
 4. 在 **账号与权限** 新建普通账号，在该账号的授权列表勾选允许播放的目录。普通账号只能看到被授予的目录及后代；管理员可以看到全部已配置的目录。禁用、改密、降权或删除会撤销对应会话；撤回目录权限会阻止下一次浏览、播放或下载，已下载的文件无法收回，当前已打开的流可能继续至断开。
 
@@ -45,12 +45,20 @@ export PLAYER_DATA_DIR="$PWD/data"
 
 浏览器直接播放，支持 HTTP Range 拖动进度，不转码。片库和播放页可下载授权范围内的原视频。优先使用 **MP4（H.264 + AAC）**，或浏览器支持的 WebM。列表也识别 M4V、OGV、MOV、MKV，但容器或编码不兼容时无法播放；尤其 MKV/部分 HEVC 不通用。只读访问，不提供上传、转码、刮削、字幕管理或公网分享链接。
 
+## 投屏到 TCL Google TV / Chromecast
+
+从 **v1.1.0** 起支持投屏。在 **同一局域网** 用 `http://服务器局域网IP:8080` 打开片库，选中视频 → **投屏到电视** → 选择电视。电视会直接请求获授权的视频，不需要在电视上登录。网页可停止投屏，局域网里的浏览器和 Linux 服务不需要安装 Cast 插件。
+
+- **找不到电视：** 先唤醒 TCL，确认电视与 Linux 同一 IPv4 网段（有线或同一路由器的 Wi‑Fi 均可），不在访客 Wi‑Fi，路由器未启用无线设备隔离。在电视的系统应用中确认 **Google Cast / Chromecast built-in** 已启用，并核对电视的 Cast 名称与型号后重新搜索。如果没有收到友好名，列表可能只显示设备主机名。不要仅凭相似名字投屏；同网手机可作为对照，但 YouTube 可见本身不证明服务端收到了这台电视的 Cast 广告。Linux 防火墙如有限制，只在可信局域网允许 mDNS UDP 5353、Linux 至电视 TCP 8009、电视至应用 HTTP 端口。不必对公网开放任何投屏端口。
+- **找得到但播不了：** 首次请试 **MP4（H.264 视频 + AAC 音频）**。也会尝试 M4V、WebM，但实际编解码支持由电视决定；不转码，不支持投屏 MKV。仅支持 Google Cast，不是屏幕镜像、AirPlay、Miracast 或 DLNA。
+- **只用于家中可信网络：** 服务仅从同网段直连 HTTP 控制投屏，反代/Cloudflare 地址不提供投屏。电视获得绑定到设备 IP、登录会话和文件的临时取流权限，撤销授权、退出或停播后新请求会失败；局域网发现不验证电视的硬件身份。需要禁用功能时在 `/etc/simplewebplayer/player.env` 加 `PLAYER_DISABLE_CAST=1` 并重启。
+
 ## 以后接 cloudflared
 
 在 `/etc/simplewebplayer/player.env` 设置 `PLAYER_HOST=127.0.0.1`，在同一 Linux 上将 Cloudflare Tunnel 的源站设为 `http://127.0.0.1:8080`。公网只通过 HTTPS 访问；在同一配置文件设置 `PLAYER_SECURE_COOKIES=1` 并重启（此模式不能直接在局域网普通 HTTP 上登录）。推荐先启用 **Cloudflare Access** 白名单/身份认证及边缘登录限速。应用不信任任意转发头；隧道回源时由边缘识别并限制实际客户端。确认 Tunnel/Access 配置允许视频 Range，不缓存 `/api/*`，并按计划/条款确认大流量媒体的使用限制。不要同时在路由器转发应用端口或 SMB 445。
 
 ## 数据、维护与开源参考
 
-- 一键安装默认使用 `/var/lib/simplewebplayer`（手动启动默认 `./data`）。持久化备份应在停服后同时复制 `player.db` 和 `player.key`（保留私有权限）。仅恢复数据库而不带匹配密钥，服务不会启动；两者都不可分享。NAS 密码在库内用 AES-GCM 加密，网站密码采用加盐 scrypt。
+- 一键安装默认使用 `/var/lib/simplewebplayer`（手动启动默认 `./data`）。持久化备份应在停服后同时复制 `player.db` 和 `player.key`（保留私有权限）。已有数据库但缺少密钥时，服务会拒绝启动；若误用了另一个实例的有效密钥，服务可能启动，但无法解密已保存的 NAS 密码。因此应成套备份和恢复，两者都不可分享。NAS 密码在库内用 AES-GCM 加密，网站密码采用加盐 scrypt。
 - 技术栈：Go `net/http`、SQLite（`modernc.org/sqlite`）、[go-smb2](https://github.com/cloudsoda/go-smb2)、HTML 原生播放器。借鉴 [Jellyfin](https://github.com/jellyfin/jellyfin) 的媒体库/用户权限划分思路，没有引入其媒体服务器或前端框架。[第三方 SMB 源码及修改说明](third_party/README.md) 随项目提供。
 - 维护者可用 `bash scripts/build-release.sh vX.Y.Z` 在本机生成 Linux x86_64 / ARM64 二进制、安装脚本、服务文件及校验清单，再把 `dist/vX.Y.Z/` 的文件上传至相同版本的 GitHub Release。项目不会触发 GitHub Actions 构建。

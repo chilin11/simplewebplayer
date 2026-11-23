@@ -109,6 +109,7 @@ func (c *call) accounts(tx *sql.Tx) error {
 	}
 	if del {
 		_, e = tx.Exec("DELETE FROM users WHERE id=?", c.id)
+		c.after = c.app.casts.onAccountReset(c.id)
 		c.status = 204
 		return e
 	}
@@ -133,6 +134,7 @@ func (c *call) accounts(tx *sql.Tx) error {
 		if _, e = tx.Exec("DELETE FROM sessions WHERE user_id=?", c.id); e != nil {
 			return e
 		}
+		c.after = c.app.casts.onAccountReset(c.id)
 	}
 	old.Enabled = enabled
 	old.Role = role

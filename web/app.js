@@ -15,6 +15,7 @@
     currentEntries: [],
     filterQuery: '',
     isBrowsing: false,
+    browseVersion: 0,
     libraryDirty: false,
     // 授权列表版本：每次发起 /api/library 请求都会领取一个递增版本号，
     // 只有版本号大于已应用版本的响应才能覆盖 state.roots，防止旧响应失序覆盖新数据。
@@ -114,19 +115,12 @@
       state.libraryDirty = true;
       state.libraryDirtySince = state.rootsIssuedVersion;
     },
-    onCurrentUserUpdated: function (updatedUser) {
-      if (!state.currentUser || !updatedUser) {
-        return;
-      }
-      if (String(updatedUser.id) !== String(state.currentUser.id)) {
-        return;
-      }
-      state.currentUser = updatedUser;
-      renderUserBadge();
-      if (updatedUser.role !== 'admin' && state.activeView === 'admin') {
-        switchView('player');
-        U.showToast('当前账号角色已变更，已返回片库', 'error');
-      }
+    onOpenLibraryRoot: function (id) {
+      switchView('player', id);
+      navPlayerBtn.focus();
+    },
+    onOwnSessionRevoked: function (message) {
+      enterLoginState(message);
     },
   });
 
@@ -1143,11 +1137,11 @@
     if (state.roots.length === 0) {
       const isAdmin = state.currentUser && state.currentUser.role === 'admin';
       const emptyNodes = [
-        U.el('p', { className: 'empty-state-title', text: '暂无可访问的授权目录' }),
+        U.el('p', { className: 'empty-state-title', text: isAdmin ? '片库还没有目录' : '当前账号还没有目录授权' }),
         U.el('p', {
           className: 'empty-state-desc',
           text: isAdmin
-            ? '请前往「管理台」完成 NAS 连接配置、添加授权目录并为当前账号分配权限。'
+            ? '在管理台保存 NAS 共享后，添加一个授权目录即可浏览。管理员无需为自己分配权限。'
             : '当前账号尚未获得任何目录授权，请联系管理员为您分配目录权限。',
         }),
       ];
@@ -1160,6 +1154,7 @@
             on: {
               click: function () {
                 switchView('admin');
+                navAdminBtn.focus();
               },
             },
           })
@@ -1445,6 +1440,7 @@
 
   async function browseDirectory(rootId, relPath) {
     const req = gate.begin('libraryBrowse');
+    state.browseVersion += 1;
     let loadSucceeded = false;
     state.selectedRootId = rootId;
     state.currentPath = relPath || '';
@@ -1609,8 +1605,14 @@
     const opts = options || {};
     const req = gate.begin('libraryRoots');
     const version = nextRootsVersion();
+    const browseAtStart = state.browseVersion;
     U.clearAlert(rootsAlert);
     setRootsRefreshing(true);
+    if (!state.roots.length) {
+      rootsBar.replaceChildren();
+      browserEmpty.hidden = true;
+      browserSummary.textContent = '正在加载片库…';
+    }
 
     try {
       const res = await Api.getLibraryRoots(req.signal);
@@ -1621,20 +1623,23 @@
       applyRootsResponse(version, res);
       stopPlayerIfRootRevoked();
 
-      if (state.roots.length === 0) {
-        gate.abort('libraryBrowse');
-        state.isBrowsing = false;
-        state.selectedRootId = null;
-        state.currentPath = '';
-        state.currentEntries = [];
-        state.filterQuery = '';
-        browserFilterInput.value = '';
-        browserFilterInput.disabled = true;
+      // 请求在途时用户可能已点选其他路径；若仍有权访问，保留较新的浏览操作。
+      if (state.browseVersion !== browseAtStart && findRootById(state.selectedRootId)) {
         renderRootsBar();
-        renderBreadcrumbs();
-        U.clearAlert(browserAlert);
-        browserLoading.hidden = true;
-        renderBrowserEntries();
+        return;
+      }
+      if (opts.preferredRootId != null) {
+        // 只从当前会话最新的授权列表选择，不直接信任管理台返回的目录 ID。
+        const root = findRootById(opts.preferredRootId);
+        if (root) selectRoot(root.id);
+        else {
+          clearBrowseSelection();
+          U.setAlert(rootsAlert, '该目录已不在当前片库中，请查看最新的目录列表。', 'warning');
+        }
+        return;
+      }
+      if (!state.roots.length) {
+        clearBrowseSelection();
         return;
       }
 
@@ -1649,6 +1654,7 @@
       if (!req.isCurrent() || (err && err.isAbort)) {
         return;
       }
+      if (!state.roots.length) browserSummary.textContent = '未能加载片库，请重试。';
       U.setAlert(
         rootsAlert,
         err.message || '加载已授权目录失败。',
@@ -1703,7 +1709,7 @@
   });
 
   // ---------- 视图切换 ----------
-  function switchView(viewName) {
+  function switchView(viewName, preferredRootId) {
     const canAdmin = Boolean(state.currentUser && state.currentUser.role === 'admin');
     const target = viewName === 'admin' && canAdmin ? 'admin' : 'player';
     state.activeView = target;
@@ -1716,8 +1722,8 @@
     if (target === 'player') {
       navPlayerBtn.setAttribute('aria-current', 'page');
       navAdminBtn.removeAttribute('aria-current');
-      if (state.libraryDirty) {
-        loadLibraryRoots({ keepSelection: true });
+      if (state.libraryDirty || preferredRootId != null) {
+        loadLibraryRoots({ keepSelection: true, preferredRootId: preferredRootId });
       }
     } else {
       navAdminBtn.setAttribute('aria-current', 'page');
@@ -1739,7 +1745,7 @@
     gate.abortAll();
     adminController.reset();
     U.closeModal(true);
-    stopAndResetPlayer();
+    document.getElementById('toast-container').replaceChildren();
     state.currentUser = null;
     state.activeView = 'player';
     state.roots = [];
@@ -1748,6 +1754,7 @@
     state.currentEntries = [];
     state.filterQuery = '';
     state.isBrowsing = false;
+    stopAndResetPlayer();
     state.libraryDirty = false;
     state.libraryDirtySince = state.rootsIssuedVersion;
     state.entryDownloads = Object.create(null);
@@ -1757,7 +1764,11 @@
     browserFilterInput.value = '';
     browserFilterInput.disabled = true;
     rootsBar.replaceChildren();
+    renderBreadcrumbs();
     browserList.replaceChildren();
+    browserEmpty.replaceChildren();
+    browserEmpty.hidden = true;
+    browserSummary.textContent = '';
     U.clearAlert(rootsAlert);
     U.clearAlert(browserAlert);
     renderUserBadge();

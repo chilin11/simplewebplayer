@@ -87,6 +87,12 @@
       return typeof callbacks.getCurrentUser === 'function' ? callbacks.getCurrentUser() : null;
     }
 
+    function endOwnSession(actor, target, message) {
+      if (!actor || actor !== getCurrentUser() || String(actor.id) !== String(target.id)) return false;
+      callbacks.onOwnSessionRevoked(message);
+      return true;
+    }
+
     function formatNowTime() {
       const now = new Date();
       const pad = function (n) {
@@ -208,6 +214,16 @@
       return state.nasFetched && (nasIdentityChanged() || nasPasswordInput.value.length > 0);
     }
 
+    function syncNasControls() {
+      const busy = !state.nasFetched || state.nasSaving;
+      for (const section of nasForm.querySelectorAll('fieldset')) section.disabled = busy;
+      nasSaveBtn.disabled = busy || state.nasTesting;
+      nasSaveBtn.textContent = state.nasSaving ? '保存中…' : '保存配置';
+      nasTestBtn.disabled = busy || state.nasTesting || !state.loadedNas;
+      nasTestBtn.textContent = state.nasTesting ? '测试中…' : '测试已保存连接';
+      nasPreviewBrowseBtn.disabled = busy || !state.loadedNas;
+    }
+
     function updateNasIndicators() {
       const nas = state.loadedNas;
       if (!state.nasFetched) {
@@ -233,6 +249,7 @@
 
       nasPasswordInput.required = isNasPasswordRequired();
       nasDirtyBadge.hidden = !isNasFormDirty();
+      if (!nasDirtyBadge.hidden && nasAlert.classList.contains('alert-success')) U.clearAlert(nasAlert);
     }
 
     function applyNasToForm(nas) {
@@ -250,8 +267,13 @@
     }
 
     async function loadNasConfig() {
+      // 切回分区时只刷新未编辑的配置，不用服务器快照覆盖草稿或刚发现的共享。
+      if (state.nasSaving || state.nasTesting || isNasFormDirty() || manualShareMode || nasDiscovering || !nasShareStatus.hidden) return;
       const req = gate.begin('adminNas');
+      state.nasFetched = false;
+      syncNasControls();
       U.clearAlert(nasAlert);
+      U.clearAlert(nasTestResult);
       nasStatusBadge.textContent = '加载中…';
       nasStatusBadge.className = 'badge';
 
@@ -279,6 +301,7 @@
           })
         );
       } finally {
+        if (req.isCurrent()) syncNasControls();
         req.finish();
       }
     }
@@ -329,7 +352,7 @@
     }
 
     nasConnectBtn.addEventListener('click', async function () {
-      if (state.nasSaving) return;
+      if (!state.nasFetched || state.nasSaving) return;
       const payload = nasServerPayload(nasShareStatus);
       if (!payload) return;
       if (!payload.password && (nasServerChanged() || !state.loadedNas?.hasPassword)) {
@@ -379,9 +402,7 @@
 
     nasForm.addEventListener('submit', async function (event) {
       event.preventDefault();
-      if (state.nasSaving) {
-        return;
-      }
+      if (!state.nasFetched || state.nasSaving || state.nasTesting) return;
 
       U.clearAlert(nasAlert);
       U.clearAlert(nasTestResult);
@@ -405,34 +426,41 @@
       } else {
         gate.abort('nasShares');
       }
+      const req = gate.begin('nasSave');
       state.nasSaving = true;
-      nasConnectBtn.disabled = true;
-      nasConnectBtn.textContent = '连接 NAS';
-      nasSaveBtn.disabled = true;
-      nasSaveBtn.textContent = '保存中…';
+      syncNasControls();
 
       try {
-        const res = await Api.updateAdminNas(payload);
-        applyNasToForm(res && res.nas ? res.nas : null);
-        U.setAlert(nasAlert, 'SMB 连接配置已保存。可点击“测试已保存连接”验证连通性。', 'success');
+        const res = await Api.updateAdminNas(payload, req.signal);
+        if (!req.isCurrent()) return;
+        if (!res || !res.nas) throw new Error('未能确认保存结果，请重新读取配置后再试。');
+        applyNasToForm(res.nas);
+        const next = U.el('button', {
+          className: 'btn btn-secondary btn-sm', text: '选择授权目录…', props: { type: 'button' },
+          on: { click: function () {
+            switchTab('roots');
+            openNasPickerBtn.focus();
+            openRootPicker();
+          } },
+        });
+        U.setAlert(nasAlert, '共享“' + res.nas.share + '”的配置已保存。请选择要加入片库的目录。', 'success', next);
+        if (document.activeElement === document.body && next.getClientRects().length) next.focus();
         U.showToast('NAS 配置已保存', 'success');
       } catch (err) {
-        if (err && err.isAbort) {
-          return;
-        }
+        if (!req.isCurrent() || (err && err.isAbort)) return;
         U.setAlert(nasAlert, err.message || '保存 NAS 配置失败。', 'error');
       } finally {
-        state.nasSaving = false;
-        nasConnectBtn.disabled = false;
-        nasSaveBtn.disabled = false;
-        nasSaveBtn.textContent = '保存配置';
+        if (req.isCurrent()) {
+          state.nasSaving = false;
+          nasConnectBtn.disabled = false;
+          syncNasControls();
+        }
+        req.finish();
       }
     });
 
     nasTestBtn.addEventListener('click', async function () {
-      if (state.nasTesting) {
-        return;
-      }
+      if (!state.nasFetched || state.nasSaving || state.nasTesting) return;
       U.clearAlert(nasTestResult);
 
       if (!state.loadedNas) {
@@ -440,21 +468,21 @@
         return;
       }
 
-      const dirtyAtTest = isNasFormDirty();
+      const req = gate.begin('nasTest');
       state.nasTesting = true;
-      nasTestBtn.disabled = true;
-      nasTestBtn.textContent = '测试中…';
+      syncNasControls();
 
       try {
-        const res = await Api.testAdminNas();
+        const res = await Api.testAdminNas(req.signal);
+        if (!req.isCurrent()) return;
         const timeStr = formatNowTime();
         if (res && res.ok) {
-          const suffix = dirtyAtTest
+          const suffix = isNasFormDirty()
             ? '（注意：测试基于已保存配置，当前表单尚有未保存更改。）'
             : '';
           U.setAlert(
             nasTestResult,
-            '连接测试成功（' + timeStr + '）：已成功连通 SMB 共享。' + suffix,
+            '已保存连接测试成功（' + timeStr + '）：已连通 SMB 共享。' + suffix,
             'success'
           );
           U.showToast('SMB 连接测试通过', 'success');
@@ -462,10 +490,8 @@
           U.setAlert(nasTestResult, '连接测试未返回成功状态，请检查 NAS 配置。', 'error');
         }
       } catch (err) {
-        if (err && err.isAbort) {
-          return;
-        }
-        const suffix = dirtyAtTest
+        if (!req.isCurrent() || (err && err.isAbort)) return;
+        const suffix = isNasFormDirty()
           ? '（提示：测试基于上次已保存配置，请先保存最新修改再测。）'
           : '';
         U.setAlert(
@@ -474,9 +500,11 @@
           'error'
         );
       } finally {
-        state.nasTesting = false;
-        nasTestBtn.disabled = false;
-        nasTestBtn.textContent = '测试已保存连接';
+        if (req.isCurrent()) {
+          state.nasTesting = false;
+          syncNasControls();
+        }
+        req.finish();
       }
     });
 
@@ -569,10 +597,10 @@
       }
 
       function selectPathAndClose(selectedPath) {
+        U.closeModal();
         if (typeof options.onSelect === 'function') {
           options.onSelect(selectedPath);
         }
-        U.closeModal();
       }
 
       const confirmActionBtn =
@@ -994,18 +1022,25 @@
       }
     }
 
-    openNasPickerBtn.addEventListener('click', function () {
+    function openRootPicker() {
+      if (rootCreating) return;
       U.clearAlert(rootCreateAlert);
       openNasBrowserModal({
         mode: 'pick',
         initialPath: rootCreatePath.value,
         onSelect: applyPickedRootPath,
       });
-    });
+    }
+    openNasPickerBtn.addEventListener('click', openRootPicker);
 
     adminRootsRefreshBtn.addEventListener('click', loadRoots);
 
     let rootCreating = false;
+    function setRootCreating(busy) {
+      rootCreating = busy;
+      rootCreateLabel.disabled = rootCreatePath.disabled = openNasPickerBtn.disabled = rootCreateSubmitBtn.disabled = busy;
+      rootCreateSubmitBtn.textContent = busy ? '添加中…' : '添加授权目录';
+    }
     rootCreateForm.addEventListener('submit', async function (event) {
       event.preventDefault();
       if (rootCreating) {
@@ -1022,27 +1057,30 @@
         return;
       }
 
-      rootCreating = true;
-      rootCreateSubmitBtn.disabled = true;
-      rootCreateSubmitBtn.textContent = '添加中…';
+      const req = gate.begin('createRoot');
+      setRootCreating(true);
 
       try {
-        await Api.createAdminRoot(label, path);
+        const res = await Api.createAdminRoot(label, path, req.signal);
+        if (!req.isCurrent()) return;
+        if (!res || !res.root || !res.root.id) throw new Error('未能确认创建结果，请刷新已有目录。');
         rootCreateLabel.value = '';
         rootCreatePath.value = '';
         notifyLibraryChanged();
-        U.setAlert(rootCreateAlert, '授权目录“' + label + '”已创建。请前往「账号与权限」为用户分配访问权限。', 'success');
+        const open = U.el('button', {
+          className: 'btn btn-secondary btn-sm', text: '在片库打开', props: { type: 'button' },
+          on: { click: function () { callbacks.onOpenLibraryRoot(res.root.id); } },
+        });
+        U.setAlert(rootCreateAlert, '已添加“' + label + '”。管理员可直接浏览；普通账号需要在「账号与权限」分配目录。', 'success', open);
+        if (document.activeElement === document.body && open.getClientRects().length) open.focus();
         U.showToast('授权目录已添加', 'success');
         loadRoots();
       } catch (err) {
-        if (err && err.isAbort) {
-          return;
-        }
+        if (!req.isCurrent() || (err && err.isAbort)) return;
         U.setAlert(rootCreateAlert, err.message || '添加授权目录失败。', 'error');
       } finally {
-        rootCreating = false;
-        rootCreateSubmitBtn.disabled = false;
-        rootCreateSubmitBtn.textContent = '添加授权目录';
+        if (req.isCurrent()) setRootCreating(false);
+        req.finish();
       }
     });
 
@@ -1167,6 +1205,7 @@
     }
 
     async function toggleUserEnabled(user) {
+      const actor = getCurrentUser();
       const targetEnabled = !Boolean(user.enabled);
       if (!targetEnabled) {
         const confirmed = await U.confirmDialog({
@@ -1184,10 +1223,8 @@
       U.clearAlert(adminUsersAlert);
       try {
         const res = await Api.updateAdminUser(user.id, { enabled: targetEnabled });
-        const updated = res && res.user ? res.user : null;
-        if (updated && typeof callbacks.onCurrentUserUpdated === 'function') {
-          callbacks.onCurrentUserUpdated(updated);
-        }
+        if (actor !== getCurrentUser()) return;
+        if (res && res.user && !res.user.enabled && endOwnSession(actor, user, '当前账号已停用，请使用其他已启用账号登录。')) return;
         U.showToast(
           targetEnabled ? '已启用账号“' + user.username + '”' : '已停用账号“' + user.username + '”',
           'success'
@@ -1205,6 +1242,7 @@
     }
 
     async function confirmDeleteUser(user) {
+      const actor = getCurrentUser();
       const confirmed = await U.confirmDialog({
         title: '确认删除账号',
         message: '删除账号及其目录授权后无法恢复，确认永久删除该账号吗？',
@@ -1219,6 +1257,8 @@
       U.clearAlert(adminUsersAlert);
       try {
         await Api.deleteAdminUser(user.id);
+        if (actor !== getCurrentUser()) return;
+        if (endOwnSession(actor, user, '当前账号已删除，请使用其他账号登录。')) return;
         U.showToast('已删除账号“' + user.username + '”', 'success');
         loadUsers();
       } catch (err) {
@@ -1291,7 +1331,7 @@
         isSelf
           ? U.el('div', {
               className: 'alert alert-warning',
-              text: '您正在编辑当前登录的管理员账号；如降低角色将立即退出管理台。',
+              text: '正在编辑当前账号。修改密码、角色或停用此账号都会结束本次登录。',
             })
           : null,
         U.el('div', { className: 'field' }, [
@@ -1349,20 +1389,17 @@
 
               try {
                 const res = await Api.updateAdminUser(user.id, payload);
+                if (currentUser !== getCurrentUser()) return;
                 passwordInput.value = '';
                 U.setModalLocked(false);
                 U.closeModal();
 
                 const updated = res && res.user ? res.user : null;
-                const demotedSelf = Boolean(isSelf && updated && updated.role !== 'admin');
-                if (updated && typeof callbacks.onCurrentUserUpdated === 'function') {
-                  callbacks.onCurrentUserUpdated(updated);
-                }
-                if (!demotedSelf) {
-                  U.showToast('已更新账号“' + user.username + '”', 'success');
-                  loadUsers();
-                }
+                if (updated && endOwnSession(currentUser, updated, updated.enabled ? '账号设置已更新，请重新登录。' : '当前账号已停用，请使用其他已启用账号登录。')) return;
+                U.showToast('已更新账号“' + user.username + '”', 'success');
+                loadUsers();
               } catch (err) {
+                if (currentUser !== getCurrentUser()) return;
                 U.setModalLocked(false);
                 if (err && err.status === 404) {
                   loadUsers();
@@ -1605,7 +1642,9 @@
         content: [
           U.el('p', {
             className: 'panel-desc',
-            text: '勾选该账号可浏览与播放的根目录，保存后将整体替换原有授权。',
+            text: user.role === 'admin'
+              ? '管理员可以访问所有已建目录。此处勾选的是改为普通账号后的可见目录，不会限制当前管理员权限。'
+              : '勾选该账号可浏览与播放的根目录，保存后将整体替换原有授权。',
           }),
           modalAlert,
           loadingBox,
@@ -1665,7 +1704,7 @@
         const created = res && res.user ? res.user : null;
         U.setAlert(
           userCreateAlert,
-          '账号“' + (created ? created.username : username) + '”已创建，请在账号列表中点击「目录授权」分配访问目录。',
+          '账号“' + (created ? created.username : username) + '”已创建。' + (role === 'admin' ? '管理员可直接访问全部已建目录。' : '请在账号列表中点击「目录授权」分配访问目录。'),
           'success'
         );
         U.showToast('账号创建成功', 'success');
@@ -1688,10 +1727,13 @@
 
     function reset() {
       gate.abortAll();
+      state.activeTab = 'nas';
       state.loadedNas = null;
       state.nasFetched = false;
       state.nasSaving = false;
       state.nasTesting = false;
+      syncNasControls();
+      setRootCreating(false);
       state.roots = [];
       state.users = [];
       nasHostInput.value = '';

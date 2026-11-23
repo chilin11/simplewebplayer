@@ -235,17 +235,19 @@
       return request('/api/admin/nas/shares', { method: 'POST', body: payload, signal: signal });
     },
 
-    updateAdminNas: function (payload) {
+    updateAdminNas: function (payload, signal) {
       return request('/api/admin/nas', {
         method: 'PUT',
         body: payload,
+        signal: signal,
       });
     },
 
-    testAdminNas: function () {
+    testAdminNas: function (signal) {
       return request('/api/admin/nas/test', {
         method: 'POST',
         body: {},
+        signal: signal,
       });
     },
 
@@ -265,10 +267,11 @@
       });
     },
 
-    createAdminRoot: function (label, path) {
+    createAdminRoot: function (label, path, signal) {
       return request('/api/admin/roots', {
         method: 'POST',
         body: { label: label, path: path },
+        signal: signal,
       });
     },
 

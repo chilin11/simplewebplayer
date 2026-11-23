@@ -19,7 +19,15 @@ import (
 )
 
 const cookieName = "player_session"
-const sessionTTL = 7 * 24 * time.Hour
+
+// Keep the existing integer expiry column and its comparisons compatible with
+// previous releases. This distant sentinel denotes a session without a fixed
+// server expiration; account and logout revocations still delete the row.
+const persistentSessionExpiry int64 = 253402300799 // 9999-12-31 UTC
+
+// Browsers can cap cookie retention even when the server session has no expiry.
+// Refresh the cookie when an authenticated browser opens the app.
+const sessionCookieAge = 365 * 24 * 60 * 60
 
 type User struct {
 	ID       int64  `json:"id"`
@@ -112,10 +120,30 @@ func sessionUserByHash(tx *sql.Tx, h []byte) (*User, error) {
 func (c *call) setCookie(value string, age int) {
 	cookie := &http.Cookie{Name: cookieName, Value: value, MaxAge: age, Path: "/", HttpOnly: true, Secure: c.app.opts.SecureCookies, SameSite: http.SameSiteLaxMode}
 	if age < 0 {
-		cookie.Expires = time.Unix(1, 0)
+		cookie.Expires = time.Unix(1, 0).UTC()
+	} else if age > 0 {
+		cookie.Expires = time.Now().UTC().Add(time.Duration(age) * time.Second)
 	}
 	http.SetCookie(c.w, cookie)
 }
+
+// Called only after sessionUser validated this cookie in the same transaction.
+// Already expired and revoked sessions never reach this method.
+func (c *call) renewSession(tx *sql.Tx) error {
+	cookie, err := c.r.Cookie(cookieName)
+	if err != nil {
+		return err
+	}
+	if _, err := tx.Exec("UPDATE sessions SET expires=? WHERE hash=? AND expires<>?", persistentSessionExpiry, digest(cookie.Value), persistentSessionExpiry); err != nil {
+		return err
+	}
+	c.after = func() error {
+		c.setCookie(cookie.Value, sessionCookieAge)
+		return nil
+	}
+	return nil
+}
+
 func (c *call) logout(tx *sql.Tx) error {
 	if _, e := fields(c.raw, ""); e != nil {
 		return e
@@ -220,7 +248,7 @@ func (c *call) login() error {
 		if _, e = tx.Exec("DELETE FROM sessions WHERE expires<=? OR hash=?", now, tokenHash(c.r)); e != nil {
 			return e
 		}
-		if _, e = tx.Exec("INSERT INTO sessions(hash,user_id,expires) VALUES(?,?,?)", digest(token), id, now+int64(sessionTTL/time.Second)); e != nil {
+		if _, e = tx.Exec("INSERT INTO sessions(hash,user_id,expires) VALUES(?,?,?)", digest(token), id, persistentSessionExpiry); e != nil {
 			return e
 		}
 		if account != nil {
@@ -235,6 +263,6 @@ func (c *call) login() error {
 		return e
 	}
 	a.casts.forgetSession(tokenHash(c.r)) // successful login rotated the previous session
-	c.setCookie(token, int(sessionTTL/time.Second))
+	c.setCookie(token, sessionCookieAge)
 	return nil
 }

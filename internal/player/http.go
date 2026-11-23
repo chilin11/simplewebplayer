@@ -297,6 +297,9 @@ func (c *call) run() error {
 		switch rt.key {
 		case "session":
 			c.out = map[string]any{"user": u}
+			if u != nil {
+				return c.renewSession(tx)
+			}
 		case "logout":
 			return c.logout(tx)
 		case "cast/start", "cast/discover", "cast/stop":
